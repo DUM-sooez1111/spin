@@ -77,6 +77,7 @@
         id: i,
         name: i === 0 ? 'YOU' : NAMES[i],
         player: i === 0,
+        rodActive: i < 4,
         color,
         alive: true,
         alpha: 1,
@@ -151,7 +152,7 @@
   }
 
   function resolveRodCollision(a, b) {
-    if (!a.alive || !b.alive) return;
+    if (!a.rodActive || !b.rodActive) return;
     const delta = ((a.angle - b.angle + Math.PI) % TAU + TAU) % TAU - Math.PI;
     const reach = Math.min(a.length, b.length);
     const angularGap = (a.width + b.width + 5) / Math.max(reach, 1);
@@ -175,9 +176,10 @@
 
   function physicsStep(dt) {
     const alive = state.contestants.filter(c => c.alive);
+    const rods = state.contestants.filter(c => c.rodActive);
     const phaseBoost = 1 + (COLORS.length - alive.length) * .045;
 
-    for (const rod of alive) {
+    for (const rod of rods) {
       rod.angularVelocity *= Math.pow(.997, dt * 60);
       rod.angularVelocity += Math.sin(state.elapsed * .7 + rod.id * 2.1) * .00055;
       if (Math.abs(rod.angularVelocity) < .14) {
@@ -188,11 +190,11 @@
       rod.flash = Math.max(0, rod.flash - dt);
     }
 
-    for (let i = 0; i < alive.length; i++) {
-      for (let j = i + 1; j < alive.length; j++) resolveRodCollision(alive[i], alive[j]);
+    for (let i = 0; i < rods.length; i++) {
+      for (let j = i + 1; j < rods.length; j++) resolveRodCollision(rods[i], rods[j]);
     }
 
-    for (const body of alive) applySurvivalControl(body, alive, dt);
+    for (const body of alive) applySurvivalControl(body, alive, rods, dt);
 
     for (const body of alive) {
       body.vx *= Math.pow(.988, dt * 60);
@@ -202,7 +204,7 @@
       body.vx += (state.cx - body.x) * .035 * dt;
       body.vy += (state.cy - body.y) * .035 * dt;
 
-      for (const rod of alive) {
+      for (const rod of rods) {
         const ux = Math.cos(rod.angle);
         const uy = Math.sin(rod.angle);
         const ex = state.cx + ux * rod.length;
@@ -292,7 +294,7 @@
     }
   }
 
-  function applySurvivalControl(body, alive, dt) {
+  function applySurvivalControl(body, alive, rods, dt) {
     let ax = 0;
     let ay = 0;
 
@@ -329,7 +331,7 @@
       ax += cx / centerDist * inwardPower;
       ay += cy / centerDist * inwardPower;
 
-      for (const rod of alive) {
+      for (const rod of rods) {
         const ex = state.cx + Math.cos(rod.angle) * rod.length;
         const ey = state.cy + Math.sin(rod.angle) * rod.length;
         const hit = pointSegment(body.x, body.y, state.cx, state.cy, ex, ey);
@@ -455,11 +457,12 @@
   function draw() {
     ctx.clearRect(0, 0, state.width, state.height);
     drawArena();
-    const rods = state.contestants.filter(c => c.alive).sort((a, b) => a.id - b.id);
+    const rods = state.contestants.filter(c => c.rodActive).sort((a, b) => a.id - b.id);
+    const characters = state.contestants.filter(c => c.alive).sort((a, b) => a.id - b.id);
     for (const rod of rods) drawRod(rod);
     drawHub();
-    for (const body of rods.filter(c => !c.player)) drawCharacter(body);
-    const player = rods.find(c => c.player);
+    for (const body of characters.filter(c => !c.player)) drawCharacter(body);
+    const player = characters.find(c => c.player);
     if (player) drawCharacter(player);
     drawEffects();
     if (state.pointer.active) drawPointer();
