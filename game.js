@@ -152,16 +152,25 @@
 
   function resolveRodCollision(a, b) {
     if (!a.alive || !b.alive) return;
-    let delta = ((a.angle - b.angle + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    const delta = ((a.angle - b.angle + Math.PI) % TAU + TAU) % TAU - Math.PI;
     const reach = Math.min(a.length, b.length);
     const angularGap = (a.width + b.width + 5) / Math.max(reach, 1);
-    if (Math.abs(delta) < angularGap && Math.sign(a.angularVelocity - b.angularVelocity) === -Math.sign(delta)) {
-      const mix = a.angularVelocity;
-      a.angularVelocity = b.angularVelocity * .78 + mix * .12;
-      b.angularVelocity = mix * .78 + b.angularVelocity * .12;
-      a.angle += Math.sign(delta || 1) * angularGap * .5;
-      b.angle -= Math.sign(delta || 1) * angularGap * .5;
-    }
+    const distance = Math.abs(delta);
+    if (distance >= angularGap) return;
+
+    const side = Math.sign(delta) || (a.id < b.id ? -1 : 1);
+    const overlap = angularGap - distance;
+    a.angle += side * overlap * .52;
+    b.angle -= side * overlap * .52;
+
+    const relativeSpeed = a.angularVelocity - b.angularVelocity;
+    const closing = relativeSpeed * side < 0;
+    if (!closing) return;
+
+    const average = (a.angularVelocity + b.angularVelocity) * .5;
+    const rebound = Math.max(Math.abs(relativeSpeed) * .43, .16);
+    a.angularVelocity = average + side * rebound;
+    b.angularVelocity = average - side * rebound;
   }
 
   function physicsStep(dt) {
@@ -169,8 +178,11 @@
     const phaseBoost = 1 + (COLORS.length - alive.length) * .045;
 
     for (const rod of alive) {
-      rod.angularVelocity *= Math.pow(.994, dt * 60);
+      rod.angularVelocity *= Math.pow(.997, dt * 60);
       rod.angularVelocity += Math.sin(state.elapsed * .7 + rod.id * 2.1) * .00055;
+      if (Math.abs(rod.angularVelocity) < .14) {
+        rod.angularVelocity += (rod.id % 2 ? 1 : -1) * .65 * dt;
+      }
       rod.angularVelocity = clamp(rod.angularVelocity, -2.25 * phaseBoost, 2.25 * phaseBoost);
       rod.angle += rod.angularVelocity * dt * phaseBoost;
       rod.flash = Math.max(0, rod.flash - dt);
