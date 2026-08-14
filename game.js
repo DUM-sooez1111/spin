@@ -34,6 +34,7 @@
     particles: [],
     ripples: [],
     pointer: { x: 0, y: 0, px: 0, py: 0, down: false, active: false },
+    keys: new Set(),
     toastTimer: 0,
   };
 
@@ -64,6 +65,9 @@
     state.finished = false;
     state.particles.length = 0;
     state.ripples.length = 0;
+    state.pointer.active = false;
+    state.pointer.down = false;
+    state.keys.clear();
     state.contestants = COLORS.map((color, i) => {
       const angle = (i / COLORS.length) * TAU + rand(-0.12, 0.12);
       const length = state.arenaRadius * rand(.63, .9);
@@ -71,7 +75,8 @@
       const tangent = rand(-20, 20);
       return {
         id: i,
-        name: NAMES[i],
+        name: i === 0 ? 'YOU' : NAMES[i],
+        player: i === 0,
         color,
         alive: true,
         alpha: 1,
@@ -88,6 +93,7 @@
         faceAngle: rand(0, TAU),
         danger: 0,
         scoreJitter: Math.random(),
+        aiPhase: rand(0, TAU),
         flash: 0,
       };
     });
@@ -174,6 +180,8 @@
       for (let j = i + 1; j < alive.length; j++) resolveRodCollision(alive[i], alive[j]);
     }
 
+    for (const body of alive) applySurvivalControl(body, alive, dt);
+
     for (const body of alive) {
       body.vx *= Math.pow(.988, dt * 60);
       body.vy *= Math.pow(.988, dt * 60);
@@ -239,8 +247,6 @@
       }
     }
 
-    if (state.pointer.down) applyPointerForce(dt);
-
     for (const body of alive) {
       body.x += body.vx * dt;
       body.y += body.vy * dt;
@@ -274,39 +280,88 @@
     }
   }
 
-  function applyPointerForce(dt) {
-    const p = state.pointer;
-    const dragX = p.x - p.px;
-    const dragY = p.y - p.py;
-    const dragSpeed = hypot(dragX, dragY);
-    for (const body of state.contestants) {
-      if (!body.alive) continue;
-      const dx = body.x - p.x;
-      const dy = body.y - p.y;
-      const d = hypot(dx, dy);
-      const reach = state.arenaRadius * .48;
-      if (d < reach) {
-        const influence = (1 - d / reach) * dt * 60;
-        body.vx += (dragX * 2.6 + dx / d * 15) * influence;
-        body.vy += (dragY * 2.6 + dy / d * 15) * influence;
-        body.spin += (dragX * dy - dragY * dx) * .00012;
-      }
-    }
-    if (dragSpeed > 1.5) {
-      for (const rod of state.contestants) {
-        if (!rod.alive) continue;
-        const ex = state.cx + Math.cos(rod.angle) * rod.length;
-        const ey = state.cy + Math.sin(rod.angle) * rod.length;
-        const hit = pointSegment(p.x, p.y, state.cx, state.cy, ex, ey);
-        if (hypot(hit.dx, hit.dy) < 26) {
-          const rx = p.x - state.cx;
-          const ry = p.y - state.cy;
-          rod.angularVelocity += (rx * dragY - ry * dragX) / Math.max(rod.length * rod.length, 1) * 2.3;
+  function applySurvivalControl(body, alive, dt) {
+    let ax = 0;
+    let ay = 0;
+
+    if (body.player) {
+      const left = state.keys.has('ArrowLeft') || state.keys.has('KeyA');
+      const right = state.keys.has('ArrowRight') || state.keys.has('KeyD');
+      const up = state.keys.has('ArrowUp') || state.keys.has('KeyW');
+      const down = state.keys.has('ArrowDown') || state.keys.has('KeyS');
+      const inputX = Number(right) - Number(left);
+      const inputY = Number(down) - Number(up);
+      if (inputX || inputY) {
+        const d = hypot(inputX, inputY);
+        ax += inputX / d * 285;
+        ay += inputY / d * 285;
+        state.pointer.active = false;
+      } else if (state.pointer.active) {
+        const dx = state.pointer.x - body.x;
+        const dy = state.pointer.y - body.y;
+        const d = hypot(dx, dy);
+        if (d < 12) {
+          state.pointer.active = false;
+        } else {
+          const power = clamp(d * 4.2, 90, 285);
+          ax += dx / d * power;
+          ay += dy / d * power;
         }
       }
+    } else {
+      const cx = state.cx - body.x;
+      const cy = state.cy - body.y;
+      const centerDist = hypot(cx, cy);
+      const edgeRatio = centerDist / state.arenaRadius;
+      const inwardPower = 18 + Math.max(0, edgeRatio - .55) * 230;
+      ax += cx / centerDist * inwardPower;
+      ay += cy / centerDist * inwardPower;
+
+      for (const rod of alive) {
+        const ex = state.cx + Math.cos(rod.angle) * rod.length;
+        const ey = state.cy + Math.sin(rod.angle) * rod.length;
+        const hit = pointSegment(body.x, body.y, state.cx, state.cy, ex, ey);
+        const d = hypot(hit.dx, hit.dy);
+        const avoidRange = body.radius + 34;
+        if (d < avoidRange) {
+          const nx = hit.dx / d;
+          const ny = hit.dy / d;
+          const rx = hit.x - state.cx;
+          const ry = hit.y - state.cy;
+          const surfaceVx = -ry * rod.angularVelocity;
+          const surfaceVy = rx * rod.angularVelocity;
+          const approaching = Math.max(0, -((body.vx - surfaceVx) * nx + (body.vy - surfaceVy) * ny));
+          const power = (1 - d / avoidRange) * (95 + approaching * .75);
+          ax += nx * power;
+          ay += ny * power;
+        }
+      }
+
+      for (const other of alive) {
+        if (other === body) continue;
+        const dx = body.x - other.x;
+        const dy = body.y - other.y;
+        const d = hypot(dx, dy);
+        if (d < body.radius * 4.2) {
+          const power = (1 - d / (body.radius * 4.2)) * 55;
+          ax += dx / d * power;
+          ay += dy / d * power;
+        }
+      }
+
+      const wander = state.elapsed * (.75 + body.id * .025) + body.aiPhase;
+      ax += Math.cos(wander) * 24;
+      ay += Math.sin(wander * 1.13) * 24;
     }
-    p.px += dragX * .45;
-    p.py += dragY * .45;
+
+    body.vx += ax * dt;
+    body.vy += ay * dt;
+    const speed = hypot(body.vx, body.vy);
+    const maxSpeed = body.player ? 245 : 195;
+    if (speed > maxSpeed) {
+      body.vx = body.vx / speed * maxSpeed;
+      body.vy = body.vy / speed * maxSpeed;
+    }
   }
 
   function eliminate(body, reason) {
@@ -318,6 +373,10 @@
     roundEl.textContent = `ROUND ${String(Math.min(state.round, 10)).padStart(2, '0')}`;
     showToast(`${body.name} 탈락 · ${reason}`);
     burst(body.x, body.y, body.color, 26);
+    if (body.player) {
+      finishDefeat();
+      return;
+    }
     if (alive.length === 1) finish(alive[0]);
   }
 
@@ -348,6 +407,17 @@
     }, 900);
   }
 
+  function finishDefeat() {
+    state.finished = true;
+    setTimeout(() => {
+      state.running = false;
+      winnerFace.style.setProperty('--winner', '#ff3355');
+      winnerName.textContent = '탈락!';
+      resultText.textContent = `${formatTime(state.elapsed)} 동안 생존했습니다. 다시 도전해보세요.`;
+      resultScreen.classList.add('visible');
+    }, 650);
+  }
+
   function formatTime(seconds) {
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
@@ -376,9 +446,11 @@
     const rods = state.contestants.filter(c => c.alive).sort((a, b) => a.id - b.id);
     for (const rod of rods) drawRod(rod);
     drawHub();
-    for (const body of rods) drawCharacter(body);
+    for (const body of rods.filter(c => !c.player)) drawCharacter(body);
+    const player = rods.find(c => c.player);
+    if (player) drawCharacter(player);
     drawEffects();
-    if (state.pointer.down) drawPointer();
+    if (state.pointer.active) drawPointer();
   }
 
   function drawArena() {
@@ -455,6 +527,15 @@
     ctx.save();
     ctx.translate(body.x, body.y);
     ctx.rotate(body.faceAngle);
+    if (body.player) {
+      ctx.strokeStyle = 'rgba(255,255,255,.92)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.arc(0, 0, body.radius + 7 + Math.sin(state.elapsed * 6) * 1.5, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     if (body.danger > 0) {
       ctx.strokeStyle = `rgba(255,58,82,${clamp(body.danger, 0, 1)})`;
       ctx.lineWidth = 3;
@@ -484,6 +565,15 @@
     ctx.beginPath();
     ctx.arc(0, body.radius * .12, body.radius * .28, .22, Math.PI - .22);
     ctx.stroke();
+    if (body.player) {
+      ctx.save();
+      ctx.rotate(-body.faceAngle);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 9px "DM Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('YOU', 0, -body.radius - 13);
+      ctx.restore();
+    }
     ctx.restore();
   }
 
@@ -554,6 +644,15 @@
   const releasePointer = () => { state.pointer.down = false; };
   arena.addEventListener('pointerup', releasePointer);
   arena.addEventListener('pointercancel', releasePointer);
+
+  window.addEventListener('keydown', event => {
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
+      event.preventDefault();
+      state.keys.add(event.code);
+    }
+  });
+  window.addEventListener('keyup', event => state.keys.delete(event.code));
+  window.addEventListener('blur', () => state.keys.clear());
 
   document.querySelector('#startButton').addEventListener('click', event => {
     event.stopPropagation();

@@ -215,7 +215,17 @@ button { font: inherit; }
   letter-spacing: .12em;
 }
 
-.mouse-icon { width: 10px; height: 15px; border: 1px solid #70737d; border-radius: 6px; }
+.key-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #70737d;
+  border-radius: 5px;
+  color: #b9bcc5;
+  font-family: "DM Mono", monospace;
+  font-size: 9px;
+}
 
 .winner-face {
   width: 90px;
