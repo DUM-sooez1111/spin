@@ -74,7 +74,8 @@
       const length = state.arenaRadius * rand(.63, .9);
       const orbit = length * rand(.48, .82);
       const tangent = rand(-20, 20);
-      const angularVelocity = rand(-1.05, 1.05) + (i % 2 ? .22 : -.22);
+      const initialDirection = Math.random() < .5 ? -1 : 1;
+      const angularVelocity = initialDirection * rand(1.05, 1.8);
       return {
         id: i,
         name: i === 0 ? 'YOU' : NAMES[i],
@@ -86,8 +87,8 @@
         angle,
         angularVelocity,
         spinDirection: Math.sign(angularVelocity) || (i % 2 ? 1 : -1),
-        targetSpinSpeed: rand(.55, 1.45),
-        turnTorque: rand(1.8, 3.6),
+        targetSpinSpeed: rand(1.1, 2.15),
+        turnTorque: rand(2.6, 4.5),
         nextDirectionChange: rand(1, 4),
         turnMode: 'inertia',
         length,
@@ -183,7 +184,7 @@
     if (!closing) return;
 
     const average = (a.angularVelocity + b.angularVelocity) * .5;
-    const rebound = Math.max(Math.abs(relativeSpeed) * .43, .16);
+    const rebound = Math.max(Math.abs(relativeSpeed) * .43, .26);
     a.angularVelocity = average + side * rebound;
     b.angularVelocity = average - side * rebound;
   }
@@ -238,15 +239,15 @@
     for (const rod of rods) {
       if (state.elapsed >= rod.nextDirectionChange) {
         rod.spinDirection = -(Math.sign(rod.angularVelocity) || rod.spinDirection);
-        rod.targetSpinSpeed = rand(.5, 1.75);
+        rod.targetSpinSpeed = rand(1.05, 2.2);
         rod.nextDirectionChange = state.elapsed + rand(1, 4);
 
         if (Math.random() < .42) {
           rod.turnMode = 'impact';
-          rod.angularVelocity = rod.spinDirection * rand(.75, 1.95);
+          rod.angularVelocity = rod.spinDirection * rand(1.3, 2.2);
         } else {
           rod.turnMode = 'inertia';
-          rod.turnTorque = rand(1.8, 3.8);
+          rod.turnTorque = rand(2.6, 4.8);
           rod.angularVelocity += rand(-.18, .18);
         }
       }
