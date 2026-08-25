@@ -91,6 +91,7 @@
         turnTorque: rand(2.6, 4.5),
         nextDirectionChange: rand(1, 4),
         turnMode: 'inertia',
+        avoidanceUntil: 0,
         length,
         width: Math.max(4, state.scale * 5),
         radius: Math.max(13, state.scale * 16),
@@ -189,6 +190,78 @@
     b.angularVelocity = average - side * rebound;
   }
 
+  function rodAngularGap(a, b) {
+    const reach = Math.min(a.length, b.length);
+    return (a.width + b.width + 5) / Math.max(reach, 1);
+  }
+
+  function positiveAngleDistance(from, to) {
+    return ((to - from) % TAU + TAU) % TAU;
+  }
+
+  function forceRodEscape(rod, direction) {
+    const speed = Math.max(Math.abs(rod.angularVelocity), rand(1.25, 2));
+    rod.spinDirection = direction;
+    rod.targetSpinSpeed = rand(1.25, 2.2);
+    rod.angularVelocity = direction * speed;
+    rod.turnMode = 'impact';
+    rod.avoidanceUntil = state.elapsed + .38;
+    rod.nextDirectionChange = Math.max(rod.nextDirectionChange, state.elapsed + rand(1.2, 2.4));
+  }
+
+  function avoidApproachingRods(rods) {
+    if (rods.length < 2) return;
+    const sorted = [...rods].sort((a, b) => {
+      const aa = ((a.angle % TAU) + TAU) % TAU;
+      const bb = ((b.angle % TAU) + TAU) % TAU;
+      return aa - bb;
+    });
+    const handled = new Set();
+
+    if (sorted.length >= 3) {
+      for (let i = 0; i < sorted.length; i++) {
+        const center = sorted[i];
+        const clockwise = sorted[(i - 1 + sorted.length) % sorted.length];
+        const counterClockwise = sorted[(i + 1) % sorted.length];
+        const clockwiseDistance = positiveAngleDistance(clockwise.angle, center.angle);
+        const counterDistance = positiveAngleDistance(center.angle, counterClockwise.angle);
+        const clockwiseRange = Math.max(rodAngularGap(clockwise, center) * 4, .3);
+        const counterRange = Math.max(rodAngularGap(center, counterClockwise) * 4, .3);
+        const clockwiseClosing = center.angularVelocity - clockwise.angularVelocity < -.12;
+        const counterClosing = counterClockwise.angularVelocity - center.angularVelocity < -.12;
+        const unlocked = state.elapsed >= clockwise.avoidanceUntil && state.elapsed >= counterClockwise.avoidanceUntil;
+
+        if (clockwiseDistance < clockwiseRange && counterDistance < counterRange && clockwiseClosing && counterClosing && unlocked) {
+          forceRodEscape(clockwise, -1);
+          forceRodEscape(counterClockwise, 1);
+          handled.add(clockwise);
+          handled.add(center);
+          handled.add(counterClockwise);
+          break;
+        }
+      }
+    }
+
+    for (let i = 0; i < rods.length; i++) {
+      for (let j = i + 1; j < rods.length; j++) {
+        const a = rods[i];
+        const b = rods[j];
+        if (handled.has(a) || handled.has(b)) continue;
+        if (state.elapsed < a.avoidanceUntil || state.elapsed < b.avoidanceUntil) continue;
+        const delta = ((a.angle - b.angle + Math.PI) % TAU + TAU) % TAU - Math.PI;
+        const side = Math.sign(delta) || (a.id < b.id ? -1 : 1);
+        const approachRange = Math.max(rodAngularGap(a, b) * 3.2, .22);
+        const closing = (a.angularVelocity - b.angularVelocity) * side < -.12;
+        if (Math.abs(delta) < approachRange && closing) {
+          forceRodEscape(a, side);
+          forceRodEscape(b, -side);
+          handled.add(a);
+          handled.add(b);
+        }
+      }
+    }
+  }
+
   function startJump() {
     const player = state.contestants.find(c => c.player && c.alive);
     if (!state.running || state.finished || !player || player.jumpCooldown > 0 || player.jumpHeight > 0) return;
@@ -264,6 +337,8 @@
     }
 
     for (const body of alive) updateJump(body, dt);
+
+    avoidApproachingRods(rods);
 
     for (let i = 0; i < rods.length; i++) {
       for (let j = i + 1; j < rods.length; j++) resolveRodCollision(rods[i], rods[j]);
