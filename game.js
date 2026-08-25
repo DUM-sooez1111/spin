@@ -14,9 +14,20 @@
   const winnerFace = document.querySelector('#winnerFace');
   const winnerName = document.querySelector('#winnerName');
   const resultText = document.querySelector('#resultText');
+  const shopScreen = document.querySelector('#shopScreen');
+  const shopOptions = document.querySelector('#shopOptions');
+  const shopCycleEl = document.querySelector('#shopCycle');
 
   const COLORS = ['#ff3355', '#30a9ff', '#66ef45', '#32e5e0', '#ff79b7', '#ff9c32', '#f4f0e9', '#ffe94b', '#9454ff', '#20c7ff'];
   const NAMES = ['루비', '웨이브', '라임', '민트', '피치', '탱고', '모찌', '레몬', '바이올렛', '스카이'];
+  const SHOP_UPGRADES = [
+    { id: 'speed', icon: '↗', title: '터보 모터', description: '이동 속도와 가속력 +12%' },
+    { id: 'jump', icon: '↑', title: '점프 코일', description: '점프 높이와 체공 시간 증가' },
+    { id: 'cooldown', icon: '◷', title: '고속 충전', description: '점프 쿨타임 0.25초 감소' },
+    { id: 'shield', icon: '◇', title: '보호막 연장', description: '리스폰 보호 시간 +0.35초' },
+    { id: 'compact', icon: '●', title: '소형 프레임', description: '공 크기 8% 감소' },
+    { id: 'survival', icon: '+', title: '궤도 강화', description: '장외에서 버티는 시간 증가' },
+  ];
   const TAU = Math.PI * 2;
   const state = {
     running: false,
@@ -24,6 +35,9 @@
     lastTime: 0,
     elapsed: 0,
     nextCull: 8.5,
+    nextShopTime: 10,
+    shopOpen: false,
+    shopVisits: 0,
     round: 1,
     width: 0,
     height: 0,
@@ -62,6 +76,9 @@
   function newGame(autostart = true) {
     state.elapsed = 0;
     state.nextCull = 8.5;
+    state.nextShopTime = 10;
+    state.shopOpen = false;
+    state.shopVisits = 0;
     state.round = 1;
     state.finished = false;
     state.particles.length = 0;
@@ -69,6 +86,8 @@
     state.pointer.active = false;
     state.pointer.down = false;
     state.keys.clear();
+    shopScreen.classList.remove('visible');
+    shopOptions.replaceChildren();
     state.contestants = COLORS.map((color, i) => {
       const angle = (i / COLORS.length) * TAU + rand(-0.12, 0.12);
       const length = state.arenaRadius * rand(.63, .9);
@@ -108,6 +127,13 @@
         jumpVelocity: 0,
         jumpCooldown: 0,
         jumpSquash: 0,
+        moveAcceleration: 285,
+        maxMoveSpeed: 245,
+        jumpPower: 300,
+        jumpCooldownDuration: 2,
+        respawnShieldDuration: 1.2,
+        dangerLimit: 1.8,
+        upgradeLevels: {},
         invulnerableUntil: 0,
         respawns: 0,
         flash: 0,
@@ -267,8 +293,8 @@
   function startJump() {
     const player = state.contestants.find(c => c.player && c.alive);
     if (!state.running || state.finished || !player || player.jumpCooldown > 0 || player.jumpHeight > 0) return;
-    player.jumpVelocity = 300;
-    player.jumpCooldown = 2;
+    player.jumpVelocity = player.jumpPower;
+    player.jumpCooldown = player.jumpCooldownDuration;
     player.jumpSquash = 1;
     state.ripples.push({ x: player.x, y: player.y, radius: 5, life: .75, color: '#ffffff' });
   }
@@ -304,6 +330,76 @@
       jumpStatusEl.textContent = `JUMP · ${player.jumpCooldown.toFixed(1)}s`;
       jumpStatusEl.classList.remove('ready');
     }
+  }
+
+  function applyShopUpgrade(player, upgrade) {
+    switch (upgrade.id) {
+      case 'speed':
+        player.moveAcceleration *= 1.12;
+        player.maxMoveSpeed *= 1.12;
+        break;
+      case 'jump':
+        player.jumpPower += 38;
+        break;
+      case 'cooldown':
+        player.jumpCooldownDuration = Math.max(.75, player.jumpCooldownDuration - .25);
+        player.jumpCooldown = Math.min(player.jumpCooldown, player.jumpCooldownDuration);
+        break;
+      case 'shield':
+        player.respawnShieldDuration += .35;
+        break;
+      case 'compact':
+        player.radius = Math.max(9, player.radius * .92);
+        break;
+      case 'survival':
+        player.dangerLimit += .35;
+        break;
+    }
+    player.upgradeLevels[upgrade.id] = (player.upgradeLevels[upgrade.id] || 0) + 1;
+  }
+
+  function chooseShopUpgrade(upgrade) {
+    if (!state.shopOpen) return;
+    const player = state.contestants.find(c => c.player && c.alive);
+    if (!player) return;
+    applyShopUpgrade(player, upgrade);
+    state.shopOpen = false;
+    shopScreen.classList.remove('visible');
+    showToast(`${upgrade.title} 강화 완료 · LV.${player.upgradeLevels[upgrade.id]}`);
+  }
+
+  function openShop() {
+    const player = state.contestants.find(c => c.player && c.alive);
+    if (!player || state.finished || state.shopOpen) return;
+    state.shopOpen = true;
+    state.shopVisits++;
+    state.nextShopTime += 10;
+    shopCycleEl.textContent = String(state.shopVisits).padStart(2, '0');
+    shopOptions.replaceChildren();
+
+    const choices = [...SHOP_UPGRADES].sort(() => Math.random() - .5).slice(0, 3);
+    for (const upgrade of choices) {
+      const level = player.upgradeLevels[upgrade.id] || 0;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'shop-card';
+
+      const icon = document.createElement('span');
+      icon.className = 'shop-icon';
+      icon.textContent = upgrade.icon;
+      const title = document.createElement('strong');
+      title.textContent = upgrade.title;
+      const description = document.createElement('small');
+      description.textContent = upgrade.description;
+      const levelText = document.createElement('span');
+      levelText.className = 'shop-level';
+      levelText.textContent = `LV.${level} → ${level + 1}`;
+
+      button.append(icon, title, description, levelText);
+      button.addEventListener('click', () => chooseShopUpgrade(upgrade));
+      shopOptions.append(button);
+    }
+    shopScreen.classList.add('visible');
   }
 
   function physicsStep(dt) {
@@ -432,7 +528,7 @@
         body.vx += nx * pull * dt;
         body.vy += ny * pull * dt;
       }
-      if (body.danger > 1.8) eliminate(body, 'OUT OF ORBIT');
+      if (body.danger > body.dangerLimit) eliminate(body, 'OUT OF ORBIT');
     }
 
     if (state.elapsed >= state.nextCull && alive.length > 1) {
@@ -466,8 +562,8 @@
       const inputY = Number(down) - Number(up);
       if (inputX || inputY) {
         const d = hypot(inputX, inputY);
-        ax += inputX / d * 285;
-        ay += inputY / d * 285;
+        ax += inputX / d * body.moveAcceleration;
+        ay += inputY / d * body.moveAcceleration;
         state.pointer.active = false;
       } else if (state.pointer.active) {
         const dx = state.pointer.x - body.x;
@@ -530,7 +626,7 @@
     body.vx += ax * dt;
     body.vy += ay * dt;
     const speed = hypot(body.vx, body.vy);
-    const maxSpeed = body.player ? 245 : 195;
+    const maxSpeed = body.player ? body.maxMoveSpeed : 195;
     if (speed > maxSpeed) {
       body.vx = body.vx / speed * maxSpeed;
       body.vy = body.vy / speed * maxSpeed;
@@ -574,12 +670,12 @@
     body.jumpHeight = 0;
     body.jumpVelocity = 0;
     body.jumpSquash = -.85;
-    body.invulnerableUntil = state.elapsed + 1.2;
+    body.invulnerableUntil = state.elapsed + body.respawnShieldDuration;
     body.respawns++;
     body.flash = .5;
     state.pointer.active = false;
     state.ripples.push({ x: body.x, y: body.y, radius: 7, life: 1, color: '#ffffff' });
-    showToast(`YOU 리스폰 · 1.2초 보호`);
+    showToast(`YOU 리스폰 · ${body.respawnShieldDuration.toFixed(1)}초 보호`);
   }
 
   function eliminate(body, reason) {
@@ -616,6 +712,8 @@
 
   function finish(winner) {
     state.finished = true;
+    state.shopOpen = false;
+    shopScreen.classList.remove('visible');
     setTimeout(() => {
       state.running = false;
       winnerFace.style.setProperty('--winner', winner.color);
@@ -842,12 +940,13 @@
   function frame(now) {
     const dt = Math.min((now - state.lastTime) / 1000 || 0, .025);
     state.lastTime = now;
-    if (state.running) {
+    if (state.running && !state.shopOpen) {
       state.elapsed += dt;
       physicsStep(dt);
       updateParticles(dt);
       timerEl.textContent = formatTime(state.elapsed);
       updateJumpStatus();
+      if (!state.finished && state.elapsed >= state.nextShopTime) openShop();
     }
     draw();
     requestAnimationFrame(frame);
@@ -859,6 +958,7 @@
   }
 
   arena.addEventListener('pointerdown', event => {
+    if (event.target.closest('button')) return;
     if (!state.running) return;
     const p = pointerPosition(event);
     state.pointer = { x: p.x, y: p.y, px: p.x, py: p.y, down: true, active: true };
