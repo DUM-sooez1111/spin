@@ -108,6 +108,8 @@
         jumpVelocity: 0,
         jumpCooldown: 0,
         jumpSquash: 0,
+        invulnerableUntil: 0,
+        respawns: 0,
         flash: 0,
       };
     });
@@ -132,7 +134,7 @@
   }
 
   function collideCircleWithSegment(body, ax, ay, bx, by, halfWidth, rod) {
-    if (body.jumpHeight > 14) return;
+    if (body.jumpHeight > 14 || (body.player && state.elapsed < body.invulnerableUntil)) return;
     const hit = pointSegment(body.x, body.y, ax, ay, bx, by);
     const minDist = body.radius + halfWidth;
     let d = hypot(hit.dx, hit.dy);
@@ -369,7 +371,7 @@
       const hy = body.y - state.cy;
       const hubDist = hypot(hx, hy);
       const hubRadius = state.arenaRadius * .075 + body.radius;
-      if (hubDist < hubRadius && body.jumpHeight <= 14) {
+      if (hubDist < hubRadius && body.jumpHeight <= 14 && !(body.player && state.elapsed < body.invulnerableUntil)) {
         const nx = hx / hubDist;
         const ny = hy / hubDist;
         body.x = state.cx + nx * hubRadius;
@@ -387,6 +389,7 @@
         const a = alive[i];
         const b = alive[j];
         if (a.jumpHeight > 14 || b.jumpHeight > 14) continue;
+        if ((a.player && state.elapsed < a.invulnerableUntil) || (b.player && state.elapsed < b.invulnerableUntil)) continue;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const d = hypot(dx, dy);
@@ -417,6 +420,10 @@
       body.y += body.vy * dt;
       const dist = hypot(body.x - state.cx, body.y - state.cy);
       const safeRadius = state.arenaRadius * (1.03 - Math.min(.14, state.elapsed * .0015));
+      if (body.player && state.elapsed < body.invulnerableUntil) {
+        body.danger = 0;
+        continue;
+      }
       body.danger = dist > safeRadius ? body.danger + dt : Math.max(0, body.danger - dt * 1.7);
       if (dist > safeRadius * .84) {
         const nx = (state.cx - body.x) / dist;
@@ -429,7 +436,8 @@
     }
 
     if (state.elapsed >= state.nextCull && alive.length > 1) {
-      const candidates = state.contestants.filter(c => c.alive);
+      const candidates = state.contestants.filter(c => c.alive && !(c.player && state.elapsed < c.invulnerableUntil));
+      if (!candidates.length) return;
       const loser = candidates.sort((a, b) => {
         const da = hypot(a.x - state.cx, a.y - state.cy) + a.scoreJitter * 12;
         const db = hypot(b.x - state.cx, b.y - state.cy) + b.scoreJitter * 12;
@@ -529,8 +537,57 @@
     }
   }
 
+  function respawnPlayer(body) {
+    const oldX = body.x;
+    const oldY = body.y;
+    const others = state.contestants.filter(c => c.alive && c !== body);
+    const rods = state.contestants.filter(c => c.rodActive);
+    const offset = rand(0, TAU);
+    let best = { x: state.cx, y: state.cy, score: -Infinity };
+
+    for (let i = 0; i < 18; i++) {
+      const angle = offset + i / 18 * TAU;
+      const radius = state.arenaRadius * (i % 2 ? .42 : .3);
+      const x = state.cx + Math.cos(angle) * radius;
+      const y = state.cy + Math.sin(angle) * radius;
+      let characterClearance = state.arenaRadius;
+      let rodClearance = state.arenaRadius;
+
+      for (const other of others) characterClearance = Math.min(characterClearance, hypot(x - other.x, y - other.y));
+      for (const rod of rods) {
+        const ex = state.cx + Math.cos(rod.angle) * rod.length;
+        const ey = state.cy + Math.sin(rod.angle) * rod.length;
+        const hit = pointSegment(x, y, state.cx, state.cy, ex, ey);
+        rodClearance = Math.min(rodClearance, hypot(hit.dx, hit.dy));
+      }
+
+      const score = Math.min(characterClearance, rodClearance * 1.7);
+      if (score > best.score) best = { x, y, score };
+    }
+
+    burst(oldX, oldY, body.color, 22);
+    body.x = best.x;
+    body.y = best.y;
+    body.vx = 0;
+    body.vy = 0;
+    body.danger = 0;
+    body.jumpHeight = 0;
+    body.jumpVelocity = 0;
+    body.jumpSquash = -.85;
+    body.invulnerableUntil = state.elapsed + 1.2;
+    body.respawns++;
+    body.flash = .5;
+    state.pointer.active = false;
+    state.ripples.push({ x: body.x, y: body.y, radius: 7, life: 1, color: '#ffffff' });
+    showToast(`YOU 리스폰 · 1.2초 보호`);
+  }
+
   function eliminate(body, reason) {
     if (!body.alive || state.finished) return;
+    if (body.player) {
+      respawnPlayer(body);
+      return;
+    }
     body.alive = false;
     state.round++;
     const alive = state.contestants.filter(c => c.alive);
@@ -538,10 +595,6 @@
     roundEl.textContent = `ROUND ${String(Math.min(state.round, 10)).padStart(2, '0')}`;
     showToast(`${body.name} 탈락 · ${reason}`);
     burst(body.x, body.y, body.color, 26);
-    if (body.player) {
-      finishDefeat();
-      return;
-    }
     if (alive.length === 1) finish(alive[0]);
   }
 
@@ -570,17 +623,6 @@
       resultText.textContent = `${formatTime(state.elapsed)} 동안 마지막 궤도를 지켰습니다.`;
       resultScreen.classList.add('visible');
     }, 900);
-  }
-
-  function finishDefeat() {
-    state.finished = true;
-    setTimeout(() => {
-      state.running = false;
-      winnerFace.style.setProperty('--winner', '#ff3355');
-      winnerName.textContent = '탈락!';
-      resultText.textContent = `${formatTime(state.elapsed)} 동안 생존했습니다. 다시 도전해보세요.`;
-      resultScreen.classList.add('visible');
-    }, 650);
   }
 
   function formatTime(seconds) {
@@ -706,6 +748,16 @@
     ctx.translate(0, -visualLift);
     ctx.scale(airScale * squashX, airScale * squashY);
     ctx.rotate(body.faceAngle);
+    if (body.player && state.elapsed < body.invulnerableUntil) {
+      const shieldAlpha = .4 + Math.sin(state.elapsed * 22) * .18;
+      ctx.fillStyle = `rgba(216,255,62,${shieldAlpha * .22})`;
+      ctx.strokeStyle = `rgba(216,255,62,${shieldAlpha + .25})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, body.radius + 11, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
+    }
     if (body.player) {
       ctx.strokeStyle = 'rgba(255,255,255,.92)';
       ctx.lineWidth = 2;
