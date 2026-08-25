@@ -73,6 +73,7 @@
       const length = state.arenaRadius * rand(.63, .9);
       const orbit = length * rand(.48, .82);
       const tangent = rand(-20, 20);
+      const angularVelocity = rand(-1.05, 1.05) + (i % 2 ? .22 : -.22);
       return {
         id: i,
         name: i === 0 ? 'YOU' : NAMES[i],
@@ -82,7 +83,12 @@
         alive: true,
         alpha: 1,
         angle,
-        angularVelocity: rand(-1.05, 1.05) + (i % 2 ? .22 : -.22),
+        angularVelocity,
+        spinDirection: Math.sign(angularVelocity) || (i % 2 ? 1 : -1),
+        targetSpinSpeed: rand(.55, 1.45),
+        turnTorque: rand(1.8, 3.6),
+        nextDirectionChange: rand(1, 4),
+        turnMode: 'inertia',
         length,
         width: Math.max(4, state.scale * 5),
         radius: Math.max(13, state.scale * 16),
@@ -180,11 +186,27 @@
     const phaseBoost = 1 + (COLORS.length - alive.length) * .045;
 
     for (const rod of rods) {
-      rod.angularVelocity *= Math.pow(.997, dt * 60);
-      rod.angularVelocity += Math.sin(state.elapsed * .7 + rod.id * 2.1) * .00055;
-      if (Math.abs(rod.angularVelocity) < .14) {
-        rod.angularVelocity += (rod.id % 2 ? 1 : -1) * .65 * dt;
+      if (state.elapsed >= rod.nextDirectionChange) {
+        rod.spinDirection = -(Math.sign(rod.angularVelocity) || rod.spinDirection);
+        rod.targetSpinSpeed = rand(.5, 1.75);
+        rod.nextDirectionChange = state.elapsed + rand(1, 4);
+
+        if (Math.random() < .42) {
+          rod.turnMode = 'impact';
+          rod.angularVelocity = rod.spinDirection * rand(.75, 1.95);
+        } else {
+          rod.turnMode = 'inertia';
+          rod.turnTorque = rand(1.8, 3.8);
+          rod.angularVelocity += rand(-.18, .18);
+        }
       }
+
+      const targetVelocity = rod.spinDirection * rod.targetSpinSpeed;
+      const responseTorque = rod.turnMode === 'impact' ? 3.8 : rod.turnTorque;
+      const velocityError = targetVelocity - rod.angularVelocity;
+      rod.angularVelocity += clamp(velocityError, -responseTorque * dt, responseTorque * dt);
+      rod.angularVelocity *= Math.pow(.999, dt * 60);
+      rod.angularVelocity += Math.sin(state.elapsed * .9 + rod.id * 2.1) * .0007;
       rod.angularVelocity = clamp(rod.angularVelocity, -2.25 * phaseBoost, 2.25 * phaseBoost);
       rod.angle += rod.angularVelocity * dt * phaseBoost;
       rod.flash = Math.max(0, rod.flash - dt);
