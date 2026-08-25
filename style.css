@@ -124,6 +124,16 @@ button { font: inherit; }
   color: rgba(255,255,255,.45);
 }
 
+.jump-status {
+  color: rgba(255,255,255,.34);
+  transition: color .18s ease, text-shadow .18s ease;
+}
+
+.jump-status.ready {
+  color: var(--acid);
+  text-shadow: 0 0 12px rgba(216,255,62,.45);
+}
+
 .toast {
   position: absolute;
   top: 48px;
@@ -225,6 +235,19 @@ button { font: inherit; }
   color: #b9bcc5;
   font-family: "DM Mono", monospace;
   font-size: 9px;
+}
+
+.space-key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  height: 20px;
+  padding-inline: 7px;
+  border: 1px solid #70737d;
+  border-radius: 5px;
+  color: #b9bcc5;
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
 }
 
 .winner-face {

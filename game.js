@@ -7,6 +7,7 @@
   const remainingEl = document.querySelector('#remaining');
   const timerEl = document.querySelector('#timer');
   const roundEl = document.querySelector('#roundLabel');
+  const jumpStatusEl = document.querySelector('#jumpStatus');
   const toastEl = document.querySelector('#toast');
   const startScreen = document.querySelector('#startScreen');
   const resultScreen = document.querySelector('#resultScreen');
@@ -55,7 +56,7 @@
     state.scale = Math.min(rect.width / 520, rect.height / 720);
     state.cx = rect.width / 2;
     state.cy = rect.height / 2 + rect.height * 0.025;
-    state.arenaRadius = Math.min(rect.width * 0.43, rect.height * 0.34);
+    state.arenaRadius = Math.min(rect.width * 0.455, rect.height * 0.355);
   }
 
   function newGame(autostart = true) {
@@ -101,12 +102,18 @@
         danger: 0,
         scoreJitter: Math.random(),
         aiPhase: rand(0, TAU),
+        jumpHeight: 0,
+        jumpVelocity: 0,
+        jumpCooldown: 0,
+        jumpSquash: 0,
         flash: 0,
       };
     });
     remainingEl.textContent = String(COLORS.length);
     roundEl.textContent = 'ROUND 01';
     timerEl.textContent = '00:00';
+    jumpStatusEl.textContent = 'SPACE · READY';
+    jumpStatusEl.classList.add('ready');
     resultScreen.classList.remove('visible');
     state.running = autostart;
     state.lastTime = performance.now();
@@ -123,6 +130,7 @@
   }
 
   function collideCircleWithSegment(body, ax, ay, bx, by, halfWidth, rod) {
+    if (body.jumpHeight > 14) return;
     const hit = pointSegment(body.x, body.y, ax, ay, bx, by);
     const minDist = body.radius + halfWidth;
     let d = hypot(hit.dx, hit.dy);
@@ -180,6 +188,48 @@
     b.angularVelocity = average - side * rebound;
   }
 
+  function startJump() {
+    const player = state.contestants.find(c => c.player && c.alive);
+    if (!state.running || state.finished || !player || player.jumpCooldown > 0 || player.jumpHeight > 0) return;
+    player.jumpVelocity = 300;
+    player.jumpCooldown = 2;
+    player.jumpSquash = 1;
+    state.ripples.push({ x: player.x, y: player.y, radius: 5, life: .75, color: '#ffffff' });
+  }
+
+  function updateJump(body, dt) {
+    if (!body.player) return;
+    body.jumpCooldown = Math.max(0, body.jumpCooldown - dt);
+    body.jumpSquash *= Math.pow(.035, dt);
+    if (body.jumpHeight <= 0 && body.jumpVelocity <= 0) return;
+
+    body.jumpHeight += body.jumpVelocity * dt;
+    body.jumpVelocity -= 760 * dt;
+    if (body.jumpHeight <= 0) {
+      body.jumpHeight = 0;
+      body.jumpVelocity = 0;
+      body.jumpSquash = -.7;
+      state.ripples.push({ x: body.x, y: body.y, radius: 8, life: .9, color: body.color });
+      for (let i = 0; i < 8; i++) {
+        const angle = rand(0, TAU);
+        const speed = rand(22, 70);
+        state.particles.push({ x: body.x, y: body.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: rand(.2, .45), maxLife: .45, color: '#ffffff', size: rand(1, 2.5) });
+      }
+    }
+  }
+
+  function updateJumpStatus() {
+    const player = state.contestants.find(c => c.player);
+    if (!player || !player.alive) return;
+    if (player.jumpCooldown <= 0) {
+      jumpStatusEl.textContent = 'SPACE · READY';
+      jumpStatusEl.classList.add('ready');
+    } else {
+      jumpStatusEl.textContent = `JUMP · ${player.jumpCooldown.toFixed(1)}s`;
+      jumpStatusEl.classList.remove('ready');
+    }
+  }
+
   function physicsStep(dt) {
     const alive = state.contestants.filter(c => c.alive);
     const rods = state.contestants.filter(c => c.rodActive);
@@ -212,6 +262,8 @@
       rod.flash = Math.max(0, rod.flash - dt);
     }
 
+    for (const body of alive) updateJump(body, dt);
+
     for (let i = 0; i < rods.length; i++) {
       for (let j = i + 1; j < rods.length; j++) resolveRodCollision(rods[i], rods[j]);
     }
@@ -241,7 +293,7 @@
       const hy = body.y - state.cy;
       const hubDist = hypot(hx, hy);
       const hubRadius = state.arenaRadius * .075 + body.radius;
-      if (hubDist < hubRadius) {
+      if (hubDist < hubRadius && body.jumpHeight <= 14) {
         const nx = hx / hubDist;
         const ny = hy / hubDist;
         body.x = state.cx + nx * hubRadius;
@@ -258,6 +310,7 @@
       for (let j = i + 1; j < alive.length; j++) {
         const a = alive[i];
         const b = alive[j];
+        if (a.jumpHeight > 14 || b.jumpHeight > 14) continue;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const d = hypot(dx, dy);
@@ -563,6 +616,19 @@
   function drawCharacter(body) {
     ctx.save();
     ctx.translate(body.x, body.y);
+    if (body.player && body.jumpHeight > 0) {
+      const heightRatio = clamp(body.jumpHeight / 60, 0, 1);
+      ctx.fillStyle = `rgba(0,0,0,${.42 - heightRatio * .2})`;
+      ctx.beginPath();
+      ctx.ellipse(0, body.radius * .72, body.radius * (1 - heightRatio * .28), body.radius * .34, 0, 0, TAU);
+      ctx.fill();
+    }
+    const visualLift = body.player ? body.jumpHeight * .34 : 0;
+    const airScale = body.player ? 1 + body.jumpHeight / 520 : 1;
+    const squashX = 1 - body.jumpSquash * .1;
+    const squashY = 1 + body.jumpSquash * .15;
+    ctx.translate(0, -visualLift);
+    ctx.scale(airScale * squashX, airScale * squashY);
     ctx.rotate(body.faceAngle);
     if (body.player) {
       ctx.strokeStyle = 'rgba(255,255,255,.92)';
@@ -653,6 +719,7 @@
       physicsStep(dt);
       updateParticles(dt);
       timerEl.textContent = formatTime(state.elapsed);
+      updateJumpStatus();
     }
     draw();
     requestAnimationFrame(frame);
@@ -683,6 +750,11 @@
   arena.addEventListener('pointercancel', releasePointer);
 
   window.addEventListener('keydown', event => {
+    if (event.code === 'Space') {
+      event.preventDefault();
+      if (!event.repeat) startJump();
+      return;
+    }
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
       event.preventDefault();
       state.keys.add(event.code);
