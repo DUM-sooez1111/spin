@@ -391,29 +391,28 @@
   }
 
 
-  function spawnCoins() {
-    for (let i = 0; i < 8 && state.coins.length < 32; i++) {
-      for (let attempt = 0; attempt < 30; attempt++) {
-        const angle = rand(0, TAU);
-        const hub = state.hubs[i % state.hubs.length];
-        const radius = rand(100, 290);
-        const x = hub.x + Math.cos(angle) * radius;
-        const y = hub.y + Math.sin(angle) * radius;
-        if (hypot(x - state.cx, y - state.cy) > state.arenaRadius - 50) continue;
-        if (state.hubs.some(h => hypot(x - h.x, y - h.y) < h.radius + 24)) continue;
-        if (state.coins.some(c => hypot(c.x - x, c.y - y) < 48)) continue;
-        if (state.contestants.some(c => hypot(c.x - x, c.y - y) < c.radius + 24)) continue;
-        state.coins.push({ x, y, radius: 14, expiresAt: state.elapsed + 30, phase: rand(0, TAU) });
-        break;
-      }
+  function spawnCoin() {
+    if (state.coins.length >= 32) return;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const angle = rand(0, TAU);
+      const hub = state.hubs[Math.floor(Math.random() * state.hubs.length)];
+      const radius = rand(100, 290);
+      const x = hub.x + Math.cos(angle) * radius;
+      const y = hub.y + Math.sin(angle) * radius;
+      if (hypot(x - state.cx, y - state.cy) > state.arenaRadius - 50) continue;
+      if (state.hubs.some(h => hypot(x - h.x, y - h.y) < h.radius + 24)) continue;
+      if (state.coins.some(c => hypot(c.x - x, c.y - y) < 48)) continue;
+      if (state.contestants.some(c => hypot(c.x - x, c.y - y) < c.radius + 24)) continue;
+      state.coins.push({ x, y, radius: 14, expiresAt: state.elapsed + 30, phase: rand(0, TAU) });
+      showToast('코인 1개 등장! 금색 코인을 모으세요');
+      return;
     }
-    showToast('코인 등장! 금색 코인을 모으세요');
   }
 
   function updateCoins() {
     state.coins = state.coins.filter(c => c.expiresAt > state.elapsed);
     while (state.elapsed >= state.nextCoinTime) {
-      spawnCoins();
+      spawnCoin();
       state.nextCoinTime += 10;
     }
     const player = state.contestants.find(c => c.player && c.alive);
