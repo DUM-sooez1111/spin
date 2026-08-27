@@ -15,6 +15,15 @@
   const winnerFace = document.querySelector('#winnerFace');
   const winnerName = document.querySelector('#winnerName');
   const resultText = document.querySelector('#resultText');
+  const shopDialog = document.querySelector('#shopDialog');
+  const shopButton = document.querySelector('#shopButton');
+  const shopItems = document.querySelector('#shopItems');
+  const UPGRADES = [
+    { id: 'speed', name: '이동 속도', icon: '↗', description: '이동 속도와 가속도 +15%', base: 3, max: 4 },
+    { id: 'jump', name: '점프 재충전', icon: '↑', description: '점프 쿨타임 −0.2초', base: 4, max: 5 },
+    { id: 'shield', name: '리스폰 보호막', icon: '◇', description: '리스폰 무적 시간 +0.6초', base: 3, max: 4 },
+    { id: 'magnet', name: '코인 수집 범위', icon: '◎', description: '코인 수집 거리 +24', base: 3, max: 4 },
+  ];
 
   const COLORS = ['#ff3355', '#30a9ff', '#66ef45', '#32e5e0', '#ff79b7', '#ff9c32', '#f4f0e9', '#ffe94b', '#9454ff', '#20c7ff'];
   const NAMES = ['루비', '웨이브', '라임', '민트', '피치', '탱고', '모찌', '레몬', '바이올렛', '스카이'];
@@ -30,6 +39,10 @@
     nextCoinTime: 10,
     coins: [],
     coinScore: 0,
+    shopOpen: false,
+    upgrades: {},
+    hubs: [],
+    rods: [],
     viewScale: 1,
     viewOffsetX: 0,
     viewOffsetY: 0,
@@ -61,12 +74,12 @@
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
     // Fixed world dimensions: resizing only changes the view, never the physics.
-    state.width = 1000;
-    state.height = 1300;
+    state.width = 1400;
+    state.height = 1800;
     state.scale = 1;
-    state.cx = 500;
-    state.cy = 665;
-    state.arenaRadius = 450;
+    state.cx = 700;
+    state.cy = 925;
+    state.arenaRadius = 660;
     state.dpr = dpr;
     state.viewScale = Math.min(rect.width / state.width, rect.height / state.height);
     state.viewOffsetX = (rect.width - state.width * state.viewScale) / 2;
@@ -74,6 +87,9 @@
   }
 
   function newGame(autostart = true) {
+    state.shopOpen = false;
+    if (shopDialog.open) shopDialog.close();
+    state.upgrades = Object.fromEntries(UPGRADES.map(u => [u.id, 0]));
     state.elapsed = 0;
     state.nextCull = 8.5;
     state.nextCoinTime = 10;
@@ -88,36 +104,43 @@
     state.keys.clear();
     clearTimeout(state.toastTimer);
     toastEl.classList.remove('show');
+    // Each pivot has its own four rods. Sweep circles are separated even at
+    // maximum length, including the T-caps, so different zones cannot interlock.
+    state.hubs = [
+      { id: 0, x: 700, y: 620, radius: 25 },
+      { id: 1, x: 400, y: 1130, radius: 25 },
+      { id: 2, x: 1000, y: 1130, radius: 25 },
+    ];
+    state.rods = state.hubs.flatMap(hub => Array.from({ length: 4 }, (_, i) => {
+      const angularVelocity = (Math.random() < .5 ? -1 : 1) * rand(1.05, 1.8);
+      return {
+        id: hub.id * 4 + i, hub, rodActive: true,
+        color: COLORS[(hub.id * 3 + i) % COLORS.length],
+        angle: i / 4 * TAU + rand(-.12, .12), angularVelocity,
+        spinDirection: Math.sign(angularVelocity), targetSpinSpeed: rand(1.1, 2.15),
+        turnTorque: rand(2.6, 4.5), nextDirectionChange: rand(1, 4),
+        turnMode: 'inertia', avoidanceUntil: 0,
+        length: rand(230, 265), width: 6, flash: 0,
+      };
+    }));
     state.contestants = Array.from({ length: TOTAL_CONTESTANTS }, (_, i) => {
       const color = COLORS[i % COLORS.length];
-      const angle = (i < 4 ? i / 4 : i / TOTAL_CONTESTANTS) * TAU + rand(-.12, .12);
-      const length = state.arenaRadius * rand(.63, .9);
-      const spawnAngle = i / TOTAL_CONTESTANTS * TAU;
-      const orbit = state.arenaRadius * (i % 2 ? .7 : .42);
+      const hub = state.hubs[i % state.hubs.length];
+      const angle = Math.floor(i / 3) / 7 * TAU + rand(-.12, .12);
+      const spawnAngle = angle;
+      const orbit = i % 2 ? 200 : 145;
       const tangent = rand(-20, 20);
-      const initialDirection = Math.random() < .5 ? -1 : 1;
-      const angularVelocity = initialDirection * rand(1.05, 1.8);
       return {
         id: i,
         name: i === 0 ? 'YOU' : `${NAMES[i % NAMES.length]} ${i}`,
         player: i === 0,
-        rodActive: i < 4,
         color,
         alive: true,
         alpha: 1,
-        angle,
-        angularVelocity,
-        spinDirection: Math.sign(angularVelocity) || (i % 2 ? 1 : -1),
-        targetSpinSpeed: rand(1.1, 2.15),
-        turnTorque: rand(2.6, 4.5),
-        nextDirectionChange: rand(1, 4),
-        turnMode: 'inertia',
-        avoidanceUntil: 0,
-        length,
-        width: Math.max(4, state.scale * 5),
-        radius: i === 0 ? 23 : 21,
-        x: state.cx + Math.cos(spawnAngle) * orbit,
-        y: state.cy + Math.sin(spawnAngle) * orbit,
+        radius: i === 0 ? 27 : 25,
+        x: hub.x + Math.cos(spawnAngle) * orbit,
+        y: hub.y + Math.sin(spawnAngle) * orbit,
+        aiHub: hub.id,
         vx: Math.cos(angle + Math.PI / 2) * tangent + rand(-14, 14),
         vy: Math.sin(angle + Math.PI / 2) * tangent + rand(-14, 14),
         spin: rand(-2, 2),
@@ -135,6 +158,7 @@
         jumpPower: i === 0 ? 300 : rand(290, 325),
         jumpCooldownDuration: i === 0 ? 2 : rand(1.8, 2.7),
         respawnShieldDuration: 1.2,
+        coinReach: 0,
         dangerLimit: 1.8,
         invulnerableUntil: 0,
         respawns: 0,
@@ -149,8 +173,10 @@
     jumpStatusEl.classList.add('ready');
     resultScreen.classList.remove('visible');
     state.running = autostart;
+    shopButton.disabled = !autostart;
     state.lastTime = performance.now();
-    if (autostart) startScreen.classList.remove('visible');
+    startScreen.classList.toggle('visible', !autostart);
+    if (autostart) canvas.focus({ preventScroll: true });
   }
 
   function pointSegment(px, py, ax, ay, bx, by) {
@@ -179,8 +205,8 @@
     body.x += nx * overlap;
     body.y += ny * overlap;
 
-    const rx = hit.x - state.cx;
-    const ry = hit.y - state.cy;
+    const rx = hit.x - rod.hub.x;
+    const ry = hit.y - rod.hub.y;
     const surfaceVx = -ry * rod.angularVelocity;
     const surfaceVy = rx * rod.angularVelocity;
     const relVx = body.vx - surfaceVx;
@@ -199,10 +225,9 @@
   }
 
   function resolveRodCollision(a, b) {
-    if (!a.rodActive || !b.rodActive) return;
+    if (!a.rodActive || !b.rodActive || a.hub !== b.hub) return;
     const delta = ((a.angle - b.angle + Math.PI) % TAU + TAU) % TAU - Math.PI;
-    const reach = Math.min(a.length, b.length);
-    const angularGap = (a.width + b.width + 5) / Math.max(reach, 1);
+    const angularGap = rodAngularGap(a, b);
     const distance = Math.abs(delta);
     if (distance >= angularGap) return;
 
@@ -223,7 +248,8 @@
 
   function rodAngularGap(a, b) {
     const reach = Math.min(a.length, b.length);
-    return (a.width + b.width + 5) / Math.max(reach, 1);
+    // Include both T-caps, not just the thin shafts, in the safety angle.
+    return Math.atan2((a.length + b.length) * .12 + a.width + b.width, reach);
   }
 
   function positiveAngleDistance(from, to) {
@@ -256,8 +282,8 @@
         const counterClockwise = sorted[(i + 1) % sorted.length];
         const clockwiseDistance = positiveAngleDistance(clockwise.angle, center.angle);
         const counterDistance = positiveAngleDistance(center.angle, counterClockwise.angle);
-        const clockwiseRange = Math.max(rodAngularGap(clockwise, center) * 4, .3);
-        const counterRange = Math.max(rodAngularGap(center, counterClockwise) * 4, .3);
+        const clockwiseRange = Math.max(rodAngularGap(clockwise, center) * 1.65, .3);
+        const counterRange = Math.max(rodAngularGap(center, counterClockwise) * 1.65, .3);
         const clockwiseClosing = center.angularVelocity - clockwise.angularVelocity < -.12;
         const counterClosing = counterClockwise.angularVelocity - center.angularVelocity < -.12;
         const unlocked = state.elapsed >= clockwise.avoidanceUntil && state.elapsed >= counterClockwise.avoidanceUntil;
@@ -281,7 +307,7 @@
         if (state.elapsed < a.avoidanceUntil || state.elapsed < b.avoidanceUntil) continue;
         const delta = ((a.angle - b.angle + Math.PI) % TAU + TAU) % TAU - Math.PI;
         const side = Math.sign(delta) || (a.id < b.id ? -1 : 1);
-        const approachRange = Math.max(rodAngularGap(a, b) * 3.2, .22);
+        const approachRange = Math.max(rodAngularGap(a, b) * 1.4, .22);
         const closing = (a.angularVelocity - b.angularVelocity) * side < -.12;
         if (Math.abs(delta) < approachRange && closing) {
           forceRodEscape(a, side);
@@ -320,9 +346,9 @@
       for (const ahead of [.12, .24, .36]) {
         const angle = rod.angle + rod.angularVelocity * ahead;
         const ux = Math.cos(angle), uy = Math.sin(angle);
-        const ex = state.cx + ux * rod.length, ey = state.cy + uy * rod.length;
+        const ex = rod.hub.x + ux * rod.length, ey = rod.hub.y + uy * rod.length;
         const px = body.x + body.vx * ahead, py = body.y + body.vy * ahead;
-        const shaft = pointSegment(px, py, state.cx, state.cy, ex, ey);
+        const shaft = pointSegment(px, py, rod.hub.x, rod.hub.y, ex, ey);
         const tx = -uy * rod.length * .12, ty = ux * rod.length * .12;
         const cap = pointSegment(px, py, ex - tx, ey - ty, ex + tx, ey + ty);
         const clearance = Math.min(hypot(shaft.dx, shaft.dy), hypot(cap.dx, cap.dy));
@@ -369,9 +395,12 @@
     for (let i = 0; i < 8 && state.coins.length < 32; i++) {
       for (let attempt = 0; attempt < 30; attempt++) {
         const angle = rand(0, TAU);
-        const radius = state.arenaRadius * rand(.3, .79);
-        const x = state.cx + Math.cos(angle) * radius;
-        const y = state.cy + Math.sin(angle) * radius;
+        const hub = state.hubs[i % state.hubs.length];
+        const radius = rand(100, 290);
+        const x = hub.x + Math.cos(angle) * radius;
+        const y = hub.y + Math.sin(angle) * radius;
+        if (hypot(x - state.cx, y - state.cy) > state.arenaRadius - 50) continue;
+        if (state.hubs.some(h => hypot(x - h.x, y - h.y) < h.radius + 24)) continue;
         if (state.coins.some(c => hypot(c.x - x, c.y - y) < 48)) continue;
         if (state.contestants.some(c => hypot(c.x - x, c.y - y) < c.radius + 24)) continue;
         state.coins.push({ x, y, radius: 14, expiresAt: state.elapsed + 30, phase: rand(0, TAU) });
@@ -390,7 +419,7 @@
     const player = state.contestants.find(c => c.player && c.alive);
     if (player && player.jumpHeight < 24) {
       state.coins = state.coins.filter(coin => {
-        if (hypot(player.x - coin.x, player.y - coin.y) > player.radius + coin.radius) return true;
+        if (hypot(player.x - coin.x, player.y - coin.y) > player.radius + coin.radius + player.coinReach) return true;
         state.coinScore++;
         state.ripples.push({ x: coin.x, y: coin.y, radius: 8, life: .65, color: '#ffe268' });
         return false;
@@ -400,9 +429,68 @@
     coinCountdownEl.textContent = `코인까지 ${Math.max(0, Math.ceil(state.nextCoinTime - state.elapsed))}초`;
   }
 
+  function upgradePrice(upgrade) {
+    return upgrade.base + state.upgrades[upgrade.id] * 2;
+  }
+
+  function renderShop() {
+    const player = state.contestants.find(c => c.player);
+    document.querySelector('#shopBalance').textContent = String(state.coinScore);
+    coinCountEl.textContent = String(state.coinScore);
+    const stats = {
+      speed: `기본 대비 +${state.upgrades.speed * 15}%`,
+      jump: `현재 ${player.jumpCooldownDuration.toFixed(1)}초`,
+      shield: `현재 ${player.respawnShieldDuration.toFixed(1)}초 무적`,
+      magnet: `추가 수집 거리 ${player.coinReach}`,
+    };
+    for (const upgrade of UPGRADES) {
+      const card = shopItems.querySelector(`[data-upgrade="${upgrade.id}"]`);
+      const level = state.upgrades[upgrade.id];
+      const maxed = level >= upgrade.max;
+      const price = upgradePrice(upgrade);
+      card.querySelector('.upgrade-level').textContent = `LV ${level} / ${upgrade.max}`;
+      card.querySelector('.upgrade-stat').textContent = stats[upgrade.id];
+      const button = card.querySelector('button');
+      button.disabled = maxed || state.coinScore < price;
+      button.textContent = maxed ? '최대 강화 완료' : `◉ ${price} · ${state.coinScore < price ? '코인 부족' : '업그레이드'}`;
+    }
+  }
+
+  function openShop() {
+    if (!state.running || state.shopOpen || state.finished) return;
+    state.shopOpen = true;
+    state.running = false;
+    state.keys.clear();
+    state.pointer.active = false;
+    state.pointer.down = false;
+    document.querySelector('#shopMessage').textContent = '강화는 리스폰 후에도 유지됩니다.';
+    renderShop();
+    shopDialog.showModal();
+  }
+
+  function buyUpgrade(id) {
+    const upgrade = UPGRADES.find(u => u.id === id);
+    if (!state.shopOpen || !upgrade || state.upgrades[id] >= upgrade.max) return false;
+    const price = upgradePrice(upgrade);
+    if (state.coinScore < price) return false;
+    state.coinScore -= price;
+    state.upgrades[id]++;
+    const player = state.contestants.find(c => c.player);
+    player.moveAcceleration = 520 * (1 + state.upgrades.speed * .15);
+    player.maxMoveSpeed = 360 * (1 + state.upgrades.speed * .15);
+    player.jumpCooldownDuration = 2 - state.upgrades.jump * .2;
+    player.jumpCooldown = Math.min(player.jumpCooldown, player.jumpCooldownDuration);
+    player.respawnShieldDuration = 1.2 + state.upgrades.shield * .6;
+    player.coinReach = state.upgrades.magnet * 24;
+    renderShop();
+    updateJumpStatus();
+    document.querySelector('#shopMessage').textContent = `${upgrade.name} LV ${state.upgrades[id]} 강화 완료!`;
+    return true;
+  }
+
   function physicsStep(dt) {
     const alive = state.contestants.filter(c => c.alive);
-    const rods = state.contestants.filter(c => c.rodActive);
+    const rods = state.rods;
     const phaseBoost = 1;
 
     for (const rod of rods) {
@@ -437,7 +525,7 @@
       updateJump(body, dt);
     }
 
-    avoidApproachingRods(rods);
+    for (const hub of state.hubs) avoidApproachingRods(rods.filter(r => r.hub === hub));
 
     for (let i = 0; i < rods.length; i++) {
       for (let j = i + 1; j < rods.length; j++) resolveRodCollision(rods[i], rods[j]);
@@ -450,33 +538,35 @@
       body.vy *= Math.pow(.988, dt * 60);
       body.spin *= Math.pow(.985, dt * 60);
       body.faceAngle += body.spin * dt;
-      body.vx += (state.cx - body.x) * .035 * dt;
-      body.vy += (state.cy - body.y) * .035 * dt;
+      body.vx += (state.cx - body.x) * .012 * dt;
+      body.vy += (state.cy - body.y) * .012 * dt;
 
       for (const rod of rods) {
         const ux = Math.cos(rod.angle);
         const uy = Math.sin(rod.angle);
-        const ex = state.cx + ux * rod.length;
-        const ey = state.cy + uy * rod.length;
-        collideCircleWithSegment(body, state.cx, state.cy, ex, ey, rod.width * .55, rod);
+        const ex = rod.hub.x + ux * rod.length;
+        const ey = rod.hub.y + uy * rod.length;
+        collideCircleWithSegment(body, rod.hub.x, rod.hub.y, ex, ey, rod.width * .55, rod);
         const tx = -uy * rod.length * .12;
         const ty = ux * rod.length * .12;
         collideCircleWithSegment(body, ex - tx, ey - ty, ex + tx, ey + ty, rod.width * .55, rod);
       }
 
-      const hx = body.x - state.cx;
-      const hy = body.y - state.cy;
-      const hubDist = hypot(hx, hy);
-      const hubRadius = state.arenaRadius * .075 + body.radius;
-      if (hubDist < hubRadius && body.jumpHeight <= 14 && state.elapsed >= body.invulnerableUntil) {
-        const nx = hx / hubDist;
-        const ny = hy / hubDist;
-        body.x = state.cx + nx * hubRadius;
-        body.y = state.cy + ny * hubRadius;
-        const inward = body.vx * nx + body.vy * ny;
-        if (inward < 0) {
-          body.vx -= inward * nx * 1.7;
-          body.vy -= inward * ny * 1.7;
+      for (const hub of state.hubs) {
+        const hx = body.x - hub.x;
+        const hy = body.y - hub.y;
+        const hubDist = hypot(hx, hy);
+        const hubRadius = hub.radius + body.radius;
+        if (hubDist < hubRadius && body.jumpHeight <= 14 && state.elapsed >= body.invulnerableUntil) {
+          const nx = hubDist < .01 ? 1 : hx / hubDist;
+          const ny = hubDist < .01 ? 0 : hy / hubDist;
+          body.x = hub.x + nx * hubRadius;
+          body.y = hub.y + ny * hubRadius;
+          const inward = body.vx * nx + body.vy * ny;
+          if (inward < 0) {
+            body.vx -= inward * nx * 1.7;
+            body.vy -= inward * ny * 1.7;
+          }
         }
       }
     }
@@ -516,7 +606,7 @@
       body.x += body.vx * dt;
       body.y += body.vy * dt;
       const dist = hypot(body.x - state.cx, body.y - state.cy);
-      const safeRadius = state.arenaRadius * (1.03 - Math.min(.14, state.elapsed * .0015));
+      const safeRadius = state.arenaRadius;
       if (state.elapsed < body.invulnerableUntil) {
         body.danger = 0;
         continue;
@@ -583,21 +673,27 @@
       const cy = state.cy - body.y;
       const centerDist = hypot(cx, cy);
       const edgeRatio = centerDist / state.arenaRadius;
-      const inwardPower = 32 + Math.max(0, edgeRatio - .55) * 360;
+      const inwardPower = Math.max(0, edgeRatio - .78) * 520;
       ax += cx / centerDist * inwardPower;
       ay += cy / centerDist * inwardPower;
 
+      // Each AI patrols a zone instead of every AI crowding the world center.
+      const home = state.hubs[body.aiHub];
+      const orbitAngle = body.aiPhase + state.elapsed * .22;
+      ax += clamp((home.x + Math.cos(orbitAngle) * 180 - body.x) * .65, -150, 150);
+      ay += clamp((home.y + Math.sin(orbitAngle) * 180 - body.y) * .65, -150, 150);
+
       for (const rod of rods) {
-        const ex = state.cx + Math.cos(rod.angle) * rod.length;
-        const ey = state.cy + Math.sin(rod.angle) * rod.length;
-        const hit = pointSegment(body.x, body.y, state.cx, state.cy, ex, ey);
+        const ex = rod.hub.x + Math.cos(rod.angle) * rod.length;
+        const ey = rod.hub.y + Math.sin(rod.angle) * rod.length;
+        const hit = pointSegment(body.x, body.y, rod.hub.x, rod.hub.y, ex, ey);
         const d = hypot(hit.dx, hit.dy);
         const avoidRange = body.radius + 52;
         if (d < avoidRange) {
           const nx = hit.dx / d;
           const ny = hit.dy / d;
-          const rx = hit.x - state.cx;
-          const ry = hit.y - state.cy;
+          const rx = hit.x - rod.hub.x;
+          const ry = hit.y - rod.hub.y;
           const surfaceVx = -ry * rod.angularVelocity;
           const surfaceVy = rx * rod.angularVelocity;
           const approaching = Math.max(0, -((body.vx - surfaceVx) * nx + (body.vy - surfaceVy) * ny));
@@ -638,24 +734,28 @@
     const oldX = body.x;
     const oldY = body.y;
     const others = state.contestants.filter(c => c.alive && c !== body);
-    const rods = state.contestants.filter(c => c.rodActive);
+    const rods = state.rods;
     const offset = rand(0, TAU);
     let best = { x: state.cx, y: state.cy, score: -Infinity };
 
     for (let i = 0; i < 18; i++) {
       const angle = offset + i / 18 * TAU;
-      const radius = state.arenaRadius * (i % 2 ? .42 : .3);
-      const x = state.cx + Math.cos(angle) * radius;
-      const y = state.cy + Math.sin(angle) * radius;
+      const hub = state.hubs[body.player ? i % state.hubs.length : body.aiHub];
+      const radius = i % 2 ? 210 : 160;
+      const x = hub.x + Math.cos(angle) * radius;
+      const y = hub.y + Math.sin(angle) * radius;
       let characterClearance = state.arenaRadius;
       let rodClearance = state.arenaRadius;
 
       for (const other of others) characterClearance = Math.min(characterClearance, hypot(x - other.x, y - other.y));
       for (const rod of rods) {
-        const ex = state.cx + Math.cos(rod.angle) * rod.length;
-        const ey = state.cy + Math.sin(rod.angle) * rod.length;
-        const hit = pointSegment(x, y, state.cx, state.cy, ex, ey);
-        rodClearance = Math.min(rodClearance, hypot(hit.dx, hit.dy));
+        const ux = Math.cos(rod.angle), uy = Math.sin(rod.angle);
+        const ex = rod.hub.x + ux * rod.length;
+        const ey = rod.hub.y + uy * rod.length;
+        const hit = pointSegment(x, y, rod.hub.x, rod.hub.y, ex, ey);
+        const tx = -uy * rod.length * .12, ty = ux * rod.length * .12;
+        const cap = pointSegment(x, y, ex - tx, ey - ty, ex + tx, ey + ty);
+        rodClearance = Math.min(rodClearance, hypot(hit.dx, hit.dy), hypot(cap.dx, cap.dy));
       }
 
       const score = Math.min(characterClearance, rodClearance * 1.7);
@@ -729,10 +829,10 @@
     ctx.setTransform(scale, 0, 0, scale, state.viewOffsetX * state.dpr, state.viewOffsetY * state.dpr);
     drawArena();
     drawCoins();
-    const rods = state.contestants.filter(c => c.rodActive).sort((a, b) => a.id - b.id);
+    const rods = state.rods;
     const characters = state.contestants.filter(c => c.alive).sort((a, b) => a.id - b.id);
     for (const rod of rods) drawRod(rod);
-    drawHub();
+    for (const hub of state.hubs) drawHub(hub);
     for (const body of characters.filter(c => !c.player).sort((a, b) => a.jumpHeight - b.jumpHeight)) drawCharacter(body);
     const player = characters.find(c => c.player);
     if (player) drawCharacter(player);
@@ -757,6 +857,19 @@
     ctx.arc(0, 0, state.arenaRadius, 0, TAU);
     ctx.stroke();
     ctx.restore();
+    for (const hub of state.hubs) {
+      ctx.strokeStyle = 'rgba(255,255,255,.055)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 12]);
+      ctx.beginPath();
+      ctx.arc(hub.x, hub.y, 280, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,255,255,.28)';
+      ctx.font = '500 18px "DM Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`SECTOR 0${hub.id + 1}`, hub.x, hub.y - 295);
+    }
   }
 
   function drawCoins() {
@@ -789,8 +902,8 @@
   function drawRod(rod) {
     const ux = Math.cos(rod.angle);
     const uy = Math.sin(rod.angle);
-    const ex = state.cx + ux * rod.length;
-    const ey = state.cy + uy * rod.length;
+    const ex = rod.hub.x + ux * rod.length;
+    const ey = rod.hub.y + uy * rod.length;
     const tx = -uy * rod.length * .12;
     const ty = ux * rod.length * .12;
     ctx.save();
@@ -801,7 +914,7 @@
     ctx.lineWidth = rod.width;
     ctx.globalAlpha = .95;
     ctx.beginPath();
-    ctx.moveTo(state.cx, state.cy);
+    ctx.moveTo(rod.hub.x, rod.hub.y);
     ctx.lineTo(ex, ey);
     ctx.stroke();
     ctx.lineWidth = rod.width * 1.12;
@@ -812,28 +925,28 @@
     ctx.restore();
   }
 
-  function drawHub() {
-    const r = state.arenaRadius * .075;
-    const glow = ctx.createRadialGradient(state.cx, state.cy, 0, state.cx, state.cy, r * 2.4);
+  function drawHub(hub) {
+    const r = hub.radius;
+    const glow = ctx.createRadialGradient(hub.x, hub.y, 0, hub.x, hub.y, r * 2.4);
     glow.addColorStop(0, 'rgba(255,255,255,.65)');
     glow.addColorStop(.35, 'rgba(255,255,255,.13)');
     glow.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(state.cx, state.cy, r * 2.4, 0, TAU);
+    ctx.arc(hub.x, hub.y, r * 2.4, 0, TAU);
     ctx.fill();
     ctx.fillStyle = '#e8e9e5';
     ctx.beginPath();
-    ctx.arc(state.cx, state.cy, r, 0, TAU);
+    ctx.arc(hub.x, hub.y, r, 0, TAU);
     ctx.fill();
     ctx.fillStyle = '#0b0c10';
     ctx.beginPath();
-    ctx.arc(state.cx, state.cy, r * .42, 0, TAU);
+    ctx.arc(hub.x, hub.y, r * .42, 0, TAU);
     ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,.45)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(state.cx, state.cy, r * .7, state.elapsed, state.elapsed + Math.PI * 1.35);
+    ctx.arc(hub.x, hub.y, r * .7, state.elapsed, state.elapsed + Math.PI * 1.35);
     ctx.stroke();
   }
 
@@ -993,7 +1106,17 @@
   arena.addEventListener('pointercancel', releasePointer);
 
   window.addEventListener('keydown', event => {
+    if (event.code === 'KeyB') {
+      event.preventDefault();
+      if (!event.repeat) {
+        if (shopDialog.open) shopDialog.close();
+        else openShop();
+      }
+      return;
+    }
+    if (state.shopOpen) return;
     if (event.code === 'Space') {
+      if (event.target.closest('button')) return;
       event.preventDefault();
       if (!event.repeat) startJump();
       return;
@@ -1015,6 +1138,26 @@
     newGame(true);
   });
   document.querySelector('#restartButton').addEventListener('click', () => newGame(true));
+  document.querySelector('#jumpButton').addEventListener('click', startJump);
+  shopButton.addEventListener('click', openShop);
+  document.querySelector('#closeShopButton').addEventListener('click', () => shopDialog.close());
+  shopDialog.addEventListener('close', () => {
+    if (!state.shopOpen || shopDialog.open) return;
+    state.shopOpen = false;
+    state.keys.clear();
+    state.lastTime = performance.now();
+    state.running = !state.finished;
+    // Avoid leaving gameplay Space captured by the previously focused button.
+    canvas.focus({ preventScroll: true });
+  });
+  shopItems.innerHTML = UPGRADES.map(u => `<article class="upgrade-card" data-upgrade="${u.id}">
+    <div class="upgrade-top"><span class="upgrade-icon" aria-hidden="true">${u.icon}</span><span class="upgrade-level"></span></div>
+    <h3>${u.name}</h3><p>${u.description}</p><p class="upgrade-stat"></p>
+    <button type="button" aria-label="${u.name} 업그레이드"></button></article>`).join('');
+  shopItems.addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if (button) buyUpgrade(button.closest('[data-upgrade]').dataset.upgrade);
+  });
 
   window.addEventListener('resize', () => {
     const oldCx = state.cx;

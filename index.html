@@ -18,7 +18,7 @@
     </header>
 
     <section id="arena" class="arena" aria-label="회전 물리 게임 영역">
-      <canvas id="gameCanvas"></canvas>
+      <canvas id="gameCanvas" tabindex="0" aria-label="WASD 또는 마우스로 이동, 스페이스 점프, B 상점"></canvas>
       <div class="round-info">
         <span id="coinCountdown">코인까지 10초</span>
         <span id="jumpStatus" class="jump-status ready">SPACE · READY</span>
@@ -29,7 +29,7 @@
       <div id="startScreen" class="overlay visible">
         <div class="eyebrow">PHYSICS SURVIVAL</div>
         <h1>끝까지<br><em>회전하라</em></h1>
-        <p>20명의 AI와 넓어진 경기장에서 점프 회피!<br>10초마다 나타나는 코인을 모으세요.</p>
+        <p>3개의 중심축, 구역마다 4개의 회전 막대!<br>20명의 AI와 살아남고 코인으로 강화하세요.</p>
         <button id="startButton" class="primary-button">게임 시작 <span>↗</span></button>
         <div class="gesture-hint"><span class="key-icon">W</span> 이동 · <span class="space-key">SPACE</span> 점프</div>
       </div>
@@ -45,9 +45,22 @@
 
     <footer class="controls">
       <button id="restartButton" class="ghost-button" type="button">↻ <span>다시 시작</span></button>
-      <p><i></i> WASD / 방향키 / 마우스로 이동 · SPACE 점프 · 코인 수집</p>
+      <button id="shopButton" class="ghost-button shop-button" type="button" disabled>◉ 상점 <kbd>B</kbd></button>
+      <button id="jumpButton" class="ghost-button" type="button">↑ 점프</button>
+      <p><i></i> WASD / 방향키 / 마우스 이동 · SPACE 점프 · B 상점<br>10초마다 코인 등장 · <a href="https://github.com/DUM-sooez1111/spin" target="_blank" rel="noopener">게임 소스 ↗</a></p>
     </footer>
   </main>
+  <dialog id="shopDialog" class="shop-dialog" aria-labelledby="shopTitle" aria-describedby="shopHint">
+    <div class="shop-heading">
+      <div><div class="eyebrow">SPIN LAB / UPGRADE</div><h2 id="shopTitle">서바이벌 상점</h2></div>
+      <div class="shop-wallet">보유 코인<strong>◉ <span id="shopBalance">0</span></strong></div>
+    </div>
+    <p id="shopHint">게임 일시정지 중 · 코인으로 나만의 능력을 강화하세요.</p>
+    <div id="shopItems" class="shop-items"></div>
+    <p id="shopMessage" class="shop-message" aria-live="polite"></p>
+    <button id="closeShopButton" class="primary-button" type="button" autofocus>계속 플레이 <span>→</span></button>
+    <p class="shop-footnote">B / ESC 닫기 · 다시 시작하면 코인과 강화가 초기화됩니다.</p>
+  </dialog>
   <script src="game.js"></script>
 </body>
 </html>
