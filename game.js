@@ -6,7 +6,8 @@
   const arena = document.querySelector('#arena');
   const remainingEl = document.querySelector('#remaining');
   const timerEl = document.querySelector('#timer');
-  const roundEl = document.querySelector('#roundLabel');
+  const coinCountEl = document.querySelector('#coinCount');
+  const coinCountdownEl = document.querySelector('#coinCountdown');
   const jumpStatusEl = document.querySelector('#jumpStatus');
   const toastEl = document.querySelector('#toast');
   const startScreen = document.querySelector('#startScreen');
@@ -14,20 +15,11 @@
   const winnerFace = document.querySelector('#winnerFace');
   const winnerName = document.querySelector('#winnerName');
   const resultText = document.querySelector('#resultText');
-  const shopScreen = document.querySelector('#shopScreen');
-  const shopOptions = document.querySelector('#shopOptions');
-  const shopCycleEl = document.querySelector('#shopCycle');
 
   const COLORS = ['#ff3355', '#30a9ff', '#66ef45', '#32e5e0', '#ff79b7', '#ff9c32', '#f4f0e9', '#ffe94b', '#9454ff', '#20c7ff'];
   const NAMES = ['루비', '웨이브', '라임', '민트', '피치', '탱고', '모찌', '레몬', '바이올렛', '스카이'];
-  const SHOP_UPGRADES = [
-    { id: 'speed', icon: '↗', title: '터보 모터', description: '이동 속도와 가속력 +12%' },
-    { id: 'jump', icon: '↑', title: '점프 코일', description: '점프 높이와 체공 시간 증가' },
-    { id: 'cooldown', icon: '◷', title: '고속 충전', description: '점프 쿨타임 0.25초 감소' },
-    { id: 'shield', icon: '◇', title: '보호막 연장', description: '리스폰 보호 시간 +0.35초' },
-    { id: 'compact', icon: '●', title: '소형 프레임', description: '공 크기 8% 감소' },
-    { id: 'survival', icon: '+', title: '궤도 강화', description: '장외에서 버티는 시간 증가' },
-  ];
+  const AI_COUNT = 20;
+  const TOTAL_CONTESTANTS = AI_COUNT + 1;
   const TAU = Math.PI * 2;
   const state = {
     running: false,
@@ -35,9 +27,13 @@
     lastTime: 0,
     elapsed: 0,
     nextCull: 8.5,
-    nextShopTime: 10,
-    shopOpen: false,
-    shopVisits: 0,
+    nextCoinTime: 10,
+    coins: [],
+    coinScore: 0,
+    viewScale: 1,
+    viewOffsetX: 0,
+    viewOffsetY: 0,
+    dpr: 1,
     round: 1,
     width: 0,
     height: 0,
@@ -64,21 +60,25 @@
     canvas.height = Math.round(rect.height * dpr);
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    state.width = rect.width;
-    state.height = rect.height;
-    state.scale = Math.min(rect.width / 520, rect.height / 720);
-    state.cx = rect.width / 2;
-    state.cy = rect.height / 2 + rect.height * 0.025;
-    state.arenaRadius = Math.min(rect.width * 0.455, rect.height * 0.355);
+    // Fixed world dimensions: resizing only changes the view, never the physics.
+    state.width = 1000;
+    state.height = 1300;
+    state.scale = 1;
+    state.cx = 500;
+    state.cy = 665;
+    state.arenaRadius = 450;
+    state.dpr = dpr;
+    state.viewScale = Math.min(rect.width / state.width, rect.height / state.height);
+    state.viewOffsetX = (rect.width - state.width * state.viewScale) / 2;
+    state.viewOffsetY = (rect.height - state.height * state.viewScale) / 2;
   }
 
   function newGame(autostart = true) {
     state.elapsed = 0;
     state.nextCull = 8.5;
-    state.nextShopTime = 10;
-    state.shopOpen = false;
-    state.shopVisits = 0;
+    state.nextCoinTime = 10;
+    state.coins.length = 0;
+    state.coinScore = 0;
     state.round = 1;
     state.finished = false;
     state.particles.length = 0;
@@ -86,18 +86,20 @@
     state.pointer.active = false;
     state.pointer.down = false;
     state.keys.clear();
-    shopScreen.classList.remove('visible');
-    shopOptions.replaceChildren();
-    state.contestants = COLORS.map((color, i) => {
-      const angle = (i / COLORS.length) * TAU + rand(-0.12, 0.12);
+    clearTimeout(state.toastTimer);
+    toastEl.classList.remove('show');
+    state.contestants = Array.from({ length: TOTAL_CONTESTANTS }, (_, i) => {
+      const color = COLORS[i % COLORS.length];
+      const angle = (i < 4 ? i / 4 : i / TOTAL_CONTESTANTS) * TAU + rand(-.12, .12);
       const length = state.arenaRadius * rand(.63, .9);
-      const orbit = length * rand(.48, .82);
+      const spawnAngle = i / TOTAL_CONTESTANTS * TAU;
+      const orbit = state.arenaRadius * (i % 2 ? .7 : .42);
       const tangent = rand(-20, 20);
       const initialDirection = Math.random() < .5 ? -1 : 1;
       const angularVelocity = initialDirection * rand(1.05, 1.8);
       return {
         id: i,
-        name: i === 0 ? 'YOU' : NAMES[i],
+        name: i === 0 ? 'YOU' : `${NAMES[i % NAMES.length]} ${i}`,
         player: i === 0,
         rodActive: i < 4,
         color,
@@ -113,9 +115,9 @@
         avoidanceUntil: 0,
         length,
         width: Math.max(4, state.scale * 5),
-        radius: Math.max(13, state.scale * 16),
-        x: state.cx + Math.cos(angle) * orbit,
-        y: state.cy + Math.sin(angle) * orbit,
+        radius: i === 0 ? 23 : 21,
+        x: state.cx + Math.cos(spawnAngle) * orbit,
+        y: state.cy + Math.sin(spawnAngle) * orbit,
         vx: Math.cos(angle + Math.PI / 2) * tangent + rand(-14, 14),
         vy: Math.sin(angle + Math.PI / 2) * tangent + rand(-14, 14),
         spin: rand(-2, 2),
@@ -126,21 +128,22 @@
         jumpHeight: 0,
         jumpVelocity: 0,
         jumpCooldown: 0,
-        jumpSquash: 0,
-        moveAcceleration: 285,
-        maxMoveSpeed: 245,
-        jumpPower: 300,
-        jumpCooldownDuration: 2,
+        aiThinkIn: rand(0, .14),
+        jumps: 0,
+        moveAcceleration: 520,
+        maxMoveSpeed: 360,
+        jumpPower: i === 0 ? 300 : rand(290, 325),
+        jumpCooldownDuration: i === 0 ? 2 : rand(1.8, 2.7),
         respawnShieldDuration: 1.2,
         dangerLimit: 1.8,
-        upgradeLevels: {},
         invulnerableUntil: 0,
         respawns: 0,
         flash: 0,
       };
     });
-    remainingEl.textContent = String(COLORS.length);
-    roundEl.textContent = 'ROUND 01';
+    remainingEl.textContent = String(TOTAL_CONTESTANTS);
+    coinCountEl.textContent = '0';
+    coinCountdownEl.textContent = '코인까지 10초';
     timerEl.textContent = '00:00';
     jumpStatusEl.textContent = 'SPACE · READY';
     jumpStatusEl.classList.add('ready');
@@ -292,17 +295,47 @@
 
   function startJump() {
     const player = state.contestants.find(c => c.player && c.alive);
-    if (!state.running || state.finished || !player || player.jumpCooldown > 0 || player.jumpHeight > 0) return;
-    player.jumpVelocity = player.jumpPower;
-    player.jumpCooldown = player.jumpCooldownDuration;
-    player.jumpSquash = 1;
-    state.ripples.push({ x: player.x, y: player.y, radius: 5, life: .75, color: '#ffffff' });
+    if (!state.running || state.finished || !player) return;
+    beginJump(player);
+  }
+
+  function beginJump(body) {
+    if (!body.alive || body.jumpCooldown > 0 || body.jumpHeight > 0 || body.jumpVelocity > 0) return false;
+    body.jumpVelocity = body.jumpPower;
+    body.jumpCooldown = body.jumpCooldownDuration;
+    body.jumps++;
+    state.ripples.push({ x: body.x, y: body.y, radius: 5, life: .5, color: body.color });
+    return true;
+  }
+
+  function updateAIJump(body, rods, dt) {
+    if (body.player) return;
+    body.aiThinkIn -= dt;
+    if (body.aiThinkIn > 0) return;
+    body.aiThinkIn = rand(.08, .14);
+    if (body.jumpCooldown > 0 || body.jumpHeight > 0 || state.elapsed < body.invulnerableUntil) return;
+
+    // Predict both the shaft and T-cap at the AI's future position.
+    for (const rod of rods) {
+      for (const ahead of [.12, .24, .36]) {
+        const angle = rod.angle + rod.angularVelocity * ahead;
+        const ux = Math.cos(angle), uy = Math.sin(angle);
+        const ex = state.cx + ux * rod.length, ey = state.cy + uy * rod.length;
+        const px = body.x + body.vx * ahead, py = body.y + body.vy * ahead;
+        const shaft = pointSegment(px, py, state.cx, state.cy, ex, ey);
+        const tx = -uy * rod.length * .12, ty = ux * rod.length * .12;
+        const cap = pointSegment(px, py, ex - tx, ey - ty, ex + tx, ey + ty);
+        const clearance = Math.min(hypot(shaft.dx, shaft.dy), hypot(cap.dx, cap.dy));
+        if (clearance < body.radius + rod.width + 9) {
+          beginJump(body);
+          return;
+        }
+      }
+    }
   }
 
   function updateJump(body, dt) {
-    if (!body.player) return;
     body.jumpCooldown = Math.max(0, body.jumpCooldown - dt);
-    body.jumpSquash *= Math.pow(.035, dt);
     if (body.jumpHeight <= 0 && body.jumpVelocity <= 0) return;
 
     body.jumpHeight += body.jumpVelocity * dt;
@@ -310,9 +343,8 @@
     if (body.jumpHeight <= 0) {
       body.jumpHeight = 0;
       body.jumpVelocity = 0;
-      body.jumpSquash = -.7;
       state.ripples.push({ x: body.x, y: body.y, radius: 8, life: .9, color: body.color });
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < (body.player ? 8 : 3); i++) {
         const angle = rand(0, TAU);
         const speed = rand(22, 70);
         state.particles.push({ x: body.x, y: body.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: rand(.2, .45), maxLife: .45, color: '#ffffff', size: rand(1, 2.5) });
@@ -332,80 +364,46 @@
     }
   }
 
-  function applyShopUpgrade(player, upgrade) {
-    switch (upgrade.id) {
-      case 'speed':
-        player.moveAcceleration *= 1.12;
-        player.maxMoveSpeed *= 1.12;
+
+  function spawnCoins() {
+    for (let i = 0; i < 8 && state.coins.length < 32; i++) {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const angle = rand(0, TAU);
+        const radius = state.arenaRadius * rand(.3, .79);
+        const x = state.cx + Math.cos(angle) * radius;
+        const y = state.cy + Math.sin(angle) * radius;
+        if (state.coins.some(c => hypot(c.x - x, c.y - y) < 48)) continue;
+        if (state.contestants.some(c => hypot(c.x - x, c.y - y) < c.radius + 24)) continue;
+        state.coins.push({ x, y, radius: 14, expiresAt: state.elapsed + 30, phase: rand(0, TAU) });
         break;
-      case 'jump':
-        player.jumpPower += 38;
-        break;
-      case 'cooldown':
-        player.jumpCooldownDuration = Math.max(.75, player.jumpCooldownDuration - .25);
-        player.jumpCooldown = Math.min(player.jumpCooldown, player.jumpCooldownDuration);
-        break;
-      case 'shield':
-        player.respawnShieldDuration += .35;
-        break;
-      case 'compact':
-        player.radius = Math.max(9, player.radius * .92);
-        break;
-      case 'survival':
-        player.dangerLimit += .35;
-        break;
+      }
     }
-    player.upgradeLevels[upgrade.id] = (player.upgradeLevels[upgrade.id] || 0) + 1;
+    showToast('코인 등장! 금색 코인을 모으세요');
   }
 
-  function chooseShopUpgrade(upgrade) {
-    if (!state.shopOpen) return;
-    const player = state.contestants.find(c => c.player && c.alive);
-    if (!player) return;
-    applyShopUpgrade(player, upgrade);
-    state.shopOpen = false;
-    shopScreen.classList.remove('visible');
-    showToast(`${upgrade.title} 강화 완료 · LV.${player.upgradeLevels[upgrade.id]}`);
-  }
-
-  function openShop() {
-    const player = state.contestants.find(c => c.player && c.alive);
-    if (!player || state.finished || state.shopOpen) return;
-    state.shopOpen = true;
-    state.shopVisits++;
-    state.nextShopTime += 10;
-    shopCycleEl.textContent = String(state.shopVisits).padStart(2, '0');
-    shopOptions.replaceChildren();
-
-    const choices = [...SHOP_UPGRADES].sort(() => Math.random() - .5).slice(0, 3);
-    for (const upgrade of choices) {
-      const level = player.upgradeLevels[upgrade.id] || 0;
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'shop-card';
-
-      const icon = document.createElement('span');
-      icon.className = 'shop-icon';
-      icon.textContent = upgrade.icon;
-      const title = document.createElement('strong');
-      title.textContent = upgrade.title;
-      const description = document.createElement('small');
-      description.textContent = upgrade.description;
-      const levelText = document.createElement('span');
-      levelText.className = 'shop-level';
-      levelText.textContent = `LV.${level} → ${level + 1}`;
-
-      button.append(icon, title, description, levelText);
-      button.addEventListener('click', () => chooseShopUpgrade(upgrade));
-      shopOptions.append(button);
+  function updateCoins() {
+    state.coins = state.coins.filter(c => c.expiresAt > state.elapsed);
+    while (state.elapsed >= state.nextCoinTime) {
+      spawnCoins();
+      state.nextCoinTime += 10;
     }
-    shopScreen.classList.add('visible');
+    const player = state.contestants.find(c => c.player && c.alive);
+    if (player && player.jumpHeight < 24) {
+      state.coins = state.coins.filter(coin => {
+        if (hypot(player.x - coin.x, player.y - coin.y) > player.radius + coin.radius) return true;
+        state.coinScore++;
+        state.ripples.push({ x: coin.x, y: coin.y, radius: 8, life: .65, color: '#ffe268' });
+        return false;
+      });
+    }
+    coinCountEl.textContent = String(state.coinScore);
+    coinCountdownEl.textContent = `코인까지 ${Math.max(0, Math.ceil(state.nextCoinTime - state.elapsed))}초`;
   }
 
   function physicsStep(dt) {
     const alive = state.contestants.filter(c => c.alive);
     const rods = state.contestants.filter(c => c.rodActive);
-    const phaseBoost = 1 + (COLORS.length - alive.length) * .045;
+    const phaseBoost = 1;
 
     for (const rod of rods) {
       if (state.elapsed >= rod.nextDirectionChange) {
@@ -434,7 +432,10 @@
       rod.flash = Math.max(0, rod.flash - dt);
     }
 
-    for (const body of alive) updateJump(body, dt);
+    for (const body of alive) {
+      updateAIJump(body, rods, dt);
+      updateJump(body, dt);
+    }
 
     avoidApproachingRods(rods);
 
@@ -572,7 +573,7 @@
         if (d < 12) {
           state.pointer.active = false;
         } else {
-          const power = clamp(d * 4.2, 90, 285);
+          const power = clamp(d * 4.2, 90, body.moveAcceleration);
           ax += dx / d * power;
           ay += dy / d * power;
         }
@@ -582,7 +583,7 @@
       const cy = state.cy - body.y;
       const centerDist = hypot(cx, cy);
       const edgeRatio = centerDist / state.arenaRadius;
-      const inwardPower = 18 + Math.max(0, edgeRatio - .55) * 230;
+      const inwardPower = 32 + Math.max(0, edgeRatio - .55) * 360;
       ax += cx / centerDist * inwardPower;
       ay += cy / centerDist * inwardPower;
 
@@ -591,7 +592,7 @@
         const ey = state.cy + Math.sin(rod.angle) * rod.length;
         const hit = pointSegment(body.x, body.y, state.cx, state.cy, ex, ey);
         const d = hypot(hit.dx, hit.dy);
-        const avoidRange = body.radius + 34;
+        const avoidRange = body.radius + 52;
         if (d < avoidRange) {
           const nx = hit.dx / d;
           const ny = hit.dy / d;
@@ -619,14 +620,14 @@
       }
 
       const wander = state.elapsed * (.75 + body.id * .025) + body.aiPhase;
-      ax += Math.cos(wander) * 24;
-      ay += Math.sin(wander * 1.13) * 24;
+      ax += Math.cos(wander) * 45;
+      ay += Math.sin(wander * 1.13) * 45;
     }
 
     body.vx += ax * dt;
     body.vy += ay * dt;
     const speed = hypot(body.vx, body.vy);
-    const maxSpeed = body.player ? body.maxMoveSpeed : 195;
+    const maxSpeed = body.player ? body.maxMoveSpeed : 280;
     if (speed > maxSpeed) {
       body.vx = body.vx / speed * maxSpeed;
       body.vy = body.vy / speed * maxSpeed;
@@ -669,7 +670,6 @@
     body.danger = 0;
     body.jumpHeight = 0;
     body.jumpVelocity = 0;
-    body.jumpSquash = -.85;
     body.invulnerableUntil = state.elapsed + body.respawnShieldDuration;
     body.respawns++;
     body.flash = .5;
@@ -699,18 +699,6 @@
     state.toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1500);
   }
 
-  function finish(winner) {
-    state.finished = true;
-    state.shopOpen = false;
-    shopScreen.classList.remove('visible');
-    setTimeout(() => {
-      state.running = false;
-      winnerFace.style.setProperty('--winner', winner.color);
-      winnerName.textContent = `${winner.name} 승리!`;
-      resultText.textContent = `${formatTime(state.elapsed)} 동안 마지막 궤도를 지켰습니다.`;
-      resultScreen.classList.add('visible');
-    }, 900);
-  }
 
   function formatTime(seconds) {
     const m = Math.floor(seconds / 60);
@@ -735,13 +723,17 @@
   }
 
   function draw() {
-    ctx.clearRect(0, 0, state.width, state.height);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const scale = state.dpr * state.viewScale;
+    ctx.setTransform(scale, 0, 0, scale, state.viewOffsetX * state.dpr, state.viewOffsetY * state.dpr);
     drawArena();
+    drawCoins();
     const rods = state.contestants.filter(c => c.rodActive).sort((a, b) => a.id - b.id);
     const characters = state.contestants.filter(c => c.alive).sort((a, b) => a.id - b.id);
     for (const rod of rods) drawRod(rod);
     drawHub();
-    for (const body of characters.filter(c => !c.player)) drawCharacter(body);
+    for (const body of characters.filter(c => !c.player).sort((a, b) => a.jumpHeight - b.jumpHeight)) drawCharacter(body);
     const player = characters.find(c => c.player);
     if (player) drawCharacter(player);
     drawEffects();
@@ -765,6 +757,33 @@
     ctx.arc(0, 0, state.arenaRadius, 0, TAU);
     ctx.stroke();
     ctx.restore();
+  }
+
+  function drawCoins() {
+    for (const coin of state.coins) {
+      ctx.save();
+      ctx.translate(coin.x, coin.y);
+      ctx.globalAlpha = coin.expiresAt - state.elapsed < 3 ? .55 + Math.sin(state.elapsed * 9) * .3 : 1;
+      const pulse = 1 + Math.sin(state.elapsed * 3 + coin.phase) * .07;
+      ctx.scale(pulse, pulse);
+      ctx.shadowColor = '#ffcf38';
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = '#ffd64a';
+      ctx.beginPath();
+      ctx.arc(0, 0, coin.radius, 0, TAU);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#a66a12';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, coin.radius * .7, 0, TAU);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -6);
+      ctx.lineTo(0, 6);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   function drawRod(rod) {
@@ -821,19 +840,18 @@
   function drawCharacter(body) {
     ctx.save();
     ctx.translate(body.x, body.y);
-    if (body.player && body.jumpHeight > 0) {
+    if (body.jumpHeight > 0) {
       const heightRatio = clamp(body.jumpHeight / 60, 0, 1);
       ctx.fillStyle = `rgba(0,0,0,${.42 - heightRatio * .2})`;
       ctx.beginPath();
       ctx.ellipse(0, body.radius * .72, body.radius * (1 - heightRatio * .28), body.radius * .34, 0, 0, TAU);
       ctx.fill();
     }
-    const visualLift = body.player ? body.jumpHeight * .34 : 0;
-    const airScale = body.player ? 1 + body.jumpHeight / 520 : 1;
-    const squashX = 1 - body.jumpSquash * .1;
-    const squashY = 1 + body.jumpSquash * .15;
+    const visualLift = body.jumpHeight * .6;
+    const airScale = 1 + body.jumpHeight / 520;
     ctx.translate(0, -visualLift);
-    ctx.scale(airScale * squashX, airScale * squashY);
+    // Equal scaling preserves a perfectly round body at takeoff and landing.
+    ctx.scale(airScale, airScale);
     ctx.rotate(body.faceAngle);
     if (state.elapsed < body.invulnerableUntil) {
       const shieldAlpha = .4 + Math.sin(state.elapsed * 22) * .18;
@@ -887,7 +905,7 @@
       ctx.save();
       ctx.rotate(-body.faceAngle);
       ctx.fillStyle = '#ffffff';
-      ctx.font = '700 9px "DM Mono", monospace';
+      ctx.font = '700 18px "DM Mono", monospace';
       ctx.textAlign = 'center';
       ctx.fillText('YOU', 0, -body.radius - 13);
       ctx.restore();
@@ -929,13 +947,18 @@
   function frame(now) {
     const dt = Math.min((now - state.lastTime) / 1000 || 0, .025);
     state.lastTime = now;
-    if (state.running && !state.shopOpen) {
-      state.elapsed += dt;
-      physicsStep(dt);
+    if (state.running) {
+      // Small integration steps keep fast rods from tunnelling through circles.
+      for (let remaining = dt; remaining > .000001;) {
+        const step = Math.min(remaining, 1 / 120);
+        state.elapsed += step;
+        physicsStep(step);
+        remaining -= step;
+      }
       updateParticles(dt);
+      updateCoins();
       timerEl.textContent = formatTime(state.elapsed);
       updateJumpStatus();
-      if (!state.finished && state.elapsed >= state.nextShopTime) openShop();
     }
     draw();
     requestAnimationFrame(frame);
@@ -943,7 +966,10 @@
 
   function pointerPosition(event) {
     const rect = canvas.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    return {
+      x: (event.clientX - rect.left - state.viewOffsetX) / state.viewScale,
+      y: (event.clientY - rect.top - state.viewOffsetY) / state.viewScale,
+    };
   }
 
   arena.addEventListener('pointerdown', event => {

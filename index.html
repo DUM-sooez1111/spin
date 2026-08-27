@@ -11,29 +11,25 @@
   <main class="game-shell">
     <header class="topbar">
       <div class="brand"><span class="brand-dot"></span>SPIN OUT</div>
-      <div class="counter"><span>생존</span><strong id="remaining">10</strong><span>/ 10</span></div>
+      <div class="hud-stats">
+        <div class="coin-counter" aria-label="수집한 코인">◉ <strong id="coinCount">0</strong></div>
+        <div class="counter"><span>참가</span><strong id="remaining">21</strong><span>/ 21</span></div>
+      </div>
     </header>
 
     <section id="arena" class="arena" aria-label="회전 물리 게임 영역">
       <canvas id="gameCanvas"></canvas>
       <div class="round-info">
-        <span id="roundLabel">ROUND 01</span>
+        <span id="coinCountdown">코인까지 10초</span>
         <span id="jumpStatus" class="jump-status ready">SPACE · READY</span>
         <span id="timer">00:00</span>
       </div>
       <div id="toast" class="toast" aria-live="polite"></div>
 
-      <div id="shopScreen" class="overlay shop-screen" aria-live="polite">
-        <div class="eyebrow">10 SECOND SUPPLY</div>
-        <h2>생존 상점</h2>
-        <p><strong id="shopCycle">01</strong>번째 보급 · 하나를 선택하세요</p>
-        <div id="shopOptions" class="shop-options"></div>
-      </div>
-
       <div id="startScreen" class="overlay visible">
         <div class="eyebrow">PHYSICS SURVIVAL</div>
         <h1>끝까지<br><em>회전하라</em></h1>
-        <p>빨간색 YOU 공을 직접 조종해<br>10초마다 능력을 강화하며 오래 버티세요.</p>
+        <p>20명의 AI와 넓어진 경기장에서 점프 회피!<br>10초마다 나타나는 코인을 모으세요.</p>
         <button id="startButton" class="primary-button">게임 시작 <span>↗</span></button>
         <div class="gesture-hint"><span class="key-icon">W</span> 이동 · <span class="space-key">SPACE</span> 점프</div>
       </div>
@@ -49,7 +45,7 @@
 
     <footer class="controls">
       <button id="restartButton" class="ghost-button" type="button">↻ <span>다시 시작</span></button>
-      <p><i></i> 빨간색 YOU 공 이동 · SPACE로 장애물을 점프하세요</p>
+      <p><i></i> WASD / 방향키 / 마우스로 이동 · SPACE 점프 · 코인 수집</p>
     </footer>
   </main>
   <script src="game.js"></script>
