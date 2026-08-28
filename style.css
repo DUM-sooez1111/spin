@@ -74,6 +74,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--acid); outline-
 .hud-stats { display: flex; align-items: center; gap: 18px; }
 .coin-counter { color: #ffe268; font: 500 16px "DM Mono", monospace; white-space: nowrap; }
 .coin-counter strong { display: inline-block; min-width: 2ch; }
+#walletStatus { display: block; margin-top: 2px; color: #939b88; font: 9px "Noto Sans KR", sans-serif; text-align: right; }
+#walletStatus.save-error { color: #ff8f9d; }
 
 .counter {
   display: flex;

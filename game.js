@@ -81,8 +81,14 @@
   const rand = (min, max) => min + Math.random() * (max - min);
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
   const hypot = (x, y) => Math.hypot(x, y) || 0.0001;
+  let profileQueue = Promise.resolve();
+  let profileDatabase = null;
+  const profileChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(PROFILE_KEY) : null;
 
   function renderSaveStatus() {
+    const walletStatus = document.querySelector('#walletStatus');
+    walletStatus.textContent = state.storageAvailable ? '자동 저장' : '저장 불가';
+    walletStatus.classList.toggle('save-error', !state.storageAvailable);
     document.querySelector('#saveStatus').textContent = state.storageAvailable
       ? '코인·구매한 꾸미기·장착 상태는 이 브라우저에 자동 저장됩니다.'
       : '브라우저 저장 불가: 이번 실행에서는 유지되지만 창을 닫으면 사라질 수 있습니다.';
@@ -91,7 +97,15 @@
   function loadProfile() {
     try {
       const saved = JSON.parse(localStorage.getItem(PROFILE_KEY));
-      if (saved && saved.version === 1) {
+      applySavedProfile(saved);
+    } catch {
+      state.storageAvailable = false;
+    }
+    renderSaveStatus();
+  }
+
+  function applySavedProfile(saved) {
+    if (saved && saved.version === 1) {
         state.coinScore = Number.isSafeInteger(saved.coins) && saved.coins >= 0 && saved.coins <= 1e9 ? saved.coins : 0;
         const owned = Array.isArray(saved.owned) ? saved.owned : [];
         state.ownedCosmetics = new Set(['classic', 'none', ...COSMETICS.filter(c => owned.includes(c.id)).map(c => c.id)]);
@@ -99,26 +113,107 @@
           const item = COSMETICS.find(c => c.id === saved.equipped?.[slot] && c.slot === slot);
           if (item && state.ownedCosmetics.has(item.id)) state.equipped[slot] = item.id;
         }
-      }
-    } catch {
-      state.storageAvailable = false;
     }
-    renderSaveStatus();
+  }
+
+  function profileSnapshot() {
+    return { version: 1, coins: state.coinScore, owned: [...state.ownedCosmetics], equipped: { ...state.equipped } };
+  }
+
+  function initializeProfileDatabase() {
+    return new Promise(resolve => {
+      let request;
+      try { request = indexedDB.open('spin-out-save', 1); } catch { resolve(); return; }
+      request.onupgradeneeded = () => request.result.createObjectStore('profiles');
+      request.onerror = () => resolve();
+      request.onblocked = () => resolve();
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('profiles', 'readwrite');
+        const store = transaction.objectStore('profiles');
+        const read = store.get(PROFILE_KEY);
+        read.onsuccess = () => {
+          if (read.result) applySavedProfile(read.result);
+          else store.put(profileSnapshot(), PROFILE_KEY); // Migrate the existing wallet without resetting it.
+        };
+        transaction.oncomplete = () => {
+          profileDatabase = database;
+          database.onversionchange = () => { database.close(); profileDatabase = null; };
+          state.storageAvailable = true;
+          renderSaveStatus();
+          resolve();
+        };
+        transaction.onabort = () => { database.close(); resolve(); };
+      };
+    });
   }
 
   function saveProfile() {
     try {
       // One record keeps the wallet deduction and item ownership together.
-      localStorage.setItem(PROFILE_KEY, JSON.stringify({
-        version: 1, coins: state.coinScore,
-        owned: [...state.ownedCosmetics], equipped: state.equipped,
-      }));
+      const serialized = JSON.stringify(profileSnapshot());
+      localStorage.setItem(PROFILE_KEY, serialized);
+      if (localStorage.getItem(PROFILE_KEY) !== serialized) throw new Error('Profile write was not retained');
       state.storageAvailable = true;
     } catch {
-      if (state.storageAvailable) showToast('자동 저장 불가 · 브라우저 저장 설정을 확인하세요');
-      state.storageAvailable = false;
+      if (!profileDatabase) {
+        if (state.storageAvailable) showToast('자동 저장 불가 · 브라우저 저장 설정을 확인하세요');
+        state.storageAvailable = false;
+      }
     }
     renderSaveStatus();
+  }
+
+  function syncProfileUI() {
+    coinCountEl.textContent = String(state.coinScore);
+    applyAppearance();
+    if (state.shopOpen) renderShop();
+  }
+
+  function mutateProfile(change) {
+    // IndexedDB read-write transactions serialize the wallet across browser tabs.
+    const run = () => new Promise((resolve, reject) => {
+      if (!profileDatabase) {
+        loadProfile();
+        const result = change();
+        if (result !== false) saveProfile();
+        syncProfileUI();
+        resolve(result);
+        return;
+      }
+      const transaction = profileDatabase.transaction('profiles', 'readwrite');
+      const store = transaction.objectStore('profiles');
+      const read = store.get(PROFILE_KEY);
+      let result, snapshot;
+      read.onsuccess = () => {
+        applySavedProfile(read.result);
+        result = change();
+        snapshot = profileSnapshot();
+        if (result !== false) store.put(snapshot, PROFILE_KEY);
+      };
+      transaction.oncomplete = () => {
+        applySavedProfile(snapshot);
+        state.storageAvailable = true;
+        saveProfile(); // Compatibility backup for existing versions.
+        syncProfileUI();
+        profileChannel?.postMessage('saved');
+        resolve(result);
+      };
+      transaction.onabort = () => reject(transaction.error);
+    });
+    profileQueue = profileQueue.then(run).catch(() => {
+      state.storageAvailable = false;
+      renderSaveStatus();
+      showToast('저장 처리 실패 · 현재 창을 닫지 말고 다시 시도하세요');
+      return false;
+    });
+    return profileQueue;
+  }
+
+  function refreshSharedProfile() {
+    if (!profileDatabase) { loadProfile(); syncProfileUI(); return; }
+    const read = profileDatabase.transaction('profiles').objectStore('profiles').get(PROFILE_KEY);
+    read.onsuccess = () => { applySavedProfile(read.result); syncProfileUI(); };
   }
 
   function applyAppearance() {
@@ -470,7 +565,7 @@
   }
 
   function updateCoins() {
-    const previousScore = state.coinScore;
+    let collected = 0;
     state.coins = state.coins.filter(c => c.expiresAt > state.elapsed);
     while (state.elapsed >= state.nextCoinTime) {
       spawnCoin();
@@ -480,14 +575,17 @@
     if (player && player.jumpHeight < 24) {
       state.coins = state.coins.filter(coin => {
         if (hypot(player.x - coin.x, player.y - coin.y) > player.radius + coin.radius + player.coinReach) return true;
-        state.coinScore = Math.min(1e9, state.coinScore + 1);
+        collected++;
         state.ripples.push({ x: coin.x, y: coin.y, radius: 8, life: .65, color: '#ffe268' });
         return false;
       });
     }
     coinCountEl.textContent = String(state.coinScore);
-    if (state.coinScore !== previousScore) saveProfile();
     coinCountdownEl.textContent = `코인까지 ${Math.max(0, Math.ceil(state.nextCoinTime - state.elapsed))}초`;
+    if (collected) return mutateProfile(() => {
+      state.coinScore = Math.min(1e9, state.coinScore + collected);
+      return true;
+    });
   }
 
   function upgradePrice(upgrade) {
@@ -551,20 +649,19 @@
   }
 
   function buyOrEquipCosmetic(id) {
-    const item = COSMETICS.find(c => c.id === id);
-    if (!state.shopOpen || !item) return false;
-    const owned = state.ownedCosmetics.has(id);
-    if (!owned && state.coinScore < item.price) return false;
-    if (!owned) {
-      state.coinScore -= item.price;
-      state.ownedCosmetics.add(id);
-    }
-    state.equipped[item.slot] = id;
-    applyAppearance();
-    saveProfile();
-    renderShop();
-    document.querySelector('#shopMessage').textContent = `${item.name} ${owned ? '장착' : '구매 및 장착'} 완료!`;
-    return true;
+    return mutateProfile(() => {
+      const item = COSMETICS.find(c => c.id === id);
+      if (!state.shopOpen || !item) return false;
+      const owned = state.ownedCosmetics.has(id);
+      if (!owned && state.coinScore < item.price) return false;
+      if (!owned) {
+        state.coinScore -= item.price;
+        state.ownedCosmetics.add(id);
+      }
+      state.equipped[item.slot] = id;
+      document.querySelector('#shopMessage').textContent = `${item.name} ${owned ? '장착' : '구매 및 장착'} 완료!`;
+      return true;
+    });
   }
 
   function openShop() {
@@ -578,24 +675,24 @@
   }
 
   function buyUpgrade(id) {
-    const upgrade = UPGRADES.find(u => u.id === id);
-    if (!state.shopOpen || !upgrade || state.upgrades[id] >= upgrade.max) return false;
-    const price = upgradePrice(upgrade);
-    if (state.coinScore < price) return false;
-    state.coinScore -= price;
-    state.upgrades[id]++;
-    const player = state.contestants.find(c => c.player);
-    player.moveAcceleration = 520 * (1 + state.upgrades.speed * .15);
-    player.maxMoveSpeed = 360 * (1 + state.upgrades.speed * .15);
-    player.jumpCooldownDuration = 2 - state.upgrades.jump * .2;
-    player.jumpCooldown = Math.min(player.jumpCooldown, player.jumpCooldownDuration);
-    player.respawnShieldDuration = 1.2 + state.upgrades.shield * .6;
-    player.coinReach = state.upgrades.magnet * 24;
-    saveProfile();
-    renderShop();
-    updateJumpStatus();
-    document.querySelector('#shopMessage').textContent = `${upgrade.name} LV ${state.upgrades[id]} 강화 완료!`;
-    return true;
+    return mutateProfile(() => {
+      const upgrade = UPGRADES.find(u => u.id === id);
+      if (!state.shopOpen || !upgrade || state.upgrades[id] >= upgrade.max) return false;
+      const price = upgradePrice(upgrade);
+      if (state.coinScore < price) return false;
+      state.coinScore -= price;
+      state.upgrades[id]++;
+      const player = state.contestants.find(c => c.player);
+      player.moveAcceleration = 520 * (1 + state.upgrades.speed * .15);
+      player.maxMoveSpeed = 360 * (1 + state.upgrades.speed * .15);
+      player.jumpCooldownDuration = 2 - state.upgrades.jump * .2;
+      player.jumpCooldown = Math.min(player.jumpCooldown, player.jumpCooldownDuration);
+      player.respawnShieldDuration = 1.2 + state.upgrades.shield * .6;
+      player.coinReach = state.upgrades.magnet * 24;
+      updateJumpStatus();
+      document.querySelector('#shopMessage').textContent = `${upgrade.name} LV ${state.upgrades[id]} 강화 완료!`;
+      return true;
+    });
   }
 
   function applyCenterPull(body, dt) {
@@ -1373,8 +1470,20 @@
     for (const c of state.contestants) { c.x += dx; c.y += dy; }
   });
 
+  window.addEventListener('storage', event => {
+    if (event.key !== PROFILE_KEY) return;
+    refreshSharedProfile();
+  });
+  if (profileChannel) profileChannel.onmessage = refreshSharedProfile;
+
   loadProfile();
-  resize();
-  newGame(false);
-  requestAnimationFrame(frame);
+  document.querySelector('#startButton').disabled = true;
+  document.querySelector('#restartButton').disabled = true;
+  initializeProfileDatabase().finally(() => {
+    resize();
+    newGame(false);
+    document.querySelector('#startButton').disabled = false;
+    document.querySelector('#restartButton').disabled = false;
+    requestAnimationFrame(frame);
+  });
 })();
