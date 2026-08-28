@@ -31,6 +31,9 @@ body {
 }
 
 button { font: inherit; }
+button { touch-action: manipulation; }
+#jumpButton { touch-action: none; user-select: none; -webkit-user-select: none; }
+.touch-hint { display: none; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--acid); outline-offset: 4px; }
 
@@ -352,14 +355,42 @@ kbd { margin-left: 5px; font: 10px "DM Mono", monospace; opacity: .6; }
   color: #b5b7bd;
   font-size: 11px;
   cursor: pointer;
+  min-height: 44px;
 }
 
 @media (max-width: 480px) {
   .game-shell { padding-inline: 0; padding-bottom: 10px; }
   .topbar, .controls { padding-inline: 16px; }
-  .arena { height: calc(100svh - 118px); min-height: 500px; border-inline: 0; border-radius: 22px; }
+  .arena { height: calc(100svh - 140px); min-height: 320px; border-inline: 0; border-radius: 22px; }
   .controls p { display: none; }
   .controls { justify-content: center; }
+}
+
+@media (any-pointer: coarse) {
+  .gesture-hint { display: none; }
+  .touch-hint { display: block; margin-top: 18px; color: #999eaa; font-size: 11px; line-height: 1.7; }
+  .controls p { display: none; }
+  .controls { justify-content: center; }
+}
+
+@media (max-height: 540px) {
+  .game-shell { padding-block: 8px; min-height: 100svh; }
+  .topbar { padding-bottom: 8px; }
+  .arena { height: calc(100svh - 110px); min-height: 200px; }
+  .controls { padding-top: 8px; }
+  .controls p { display: none; }
+  .overlay { padding: 16px; }
+  .overlay h1 { font-size: 40px; }
+  .overlay h1 br { display: none; }
+  .overlay h2 { font-size: 32px; }
+  .overlay p { margin: 8px 0 12px; font-size: 11px; }
+  .eyebrow { margin-bottom: 8px; }
+  .primary-button { padding: 10px 21px; min-height: 44px; }
+  .gesture-hint, .touch-hint { margin-top: 8px; }
+  .winner-face { width: 54px; height: 54px; margin-bottom: 8px; }
+  .winner-face::before, .winner-face::after { top: 17px; width: 5px; height: 8px; }
+  .winner-face::before { left: 13px; }
+  .winner-face::after { right: 13px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

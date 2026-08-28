@@ -73,7 +73,7 @@
     contestants: [],
     particles: [],
     ripples: [],
-    pointer: { x: 0, y: 0, px: 0, py: 0, down: false, active: false },
+    pointer: { x: 0, y: 0, px: 0, py: 0, down: false, active: false, id: null, type: null },
     keys: new Set(),
     toastTimer: 0,
   };
@@ -160,9 +160,7 @@
     state.finished = false;
     state.particles.length = 0;
     state.ripples.length = 0;
-    state.pointer.active = false;
-    state.pointer.down = false;
-    state.keys.clear();
+    clearInput();
     clearTimeout(state.toastTimer);
     toastEl.classList.remove('show');
     // Each pivot has its own four rods. Sweep circles are separated even at
@@ -573,9 +571,7 @@
     if (!state.running || state.shopOpen || state.finished) return;
     state.shopOpen = true;
     state.running = false;
-    state.keys.clear();
-    state.pointer.active = false;
-    state.pointer.down = false;
+    clearInput();
     document.querySelector('#shopMessage').textContent = '꾸미기는 영구 소장 · 능력 강화는 이번 판에 적용';
     renderShop();
     shopDialog.showModal();
@@ -1257,25 +1253,42 @@
 
   arena.addEventListener('pointerdown', event => {
     if (event.target.closest('button')) return;
-    if (!state.running) return;
+    if (!state.running || state.pointer.id !== null || event.button !== 0) return;
+    event.preventDefault();
     const p = pointerPosition(event);
-    state.pointer = { x: p.x, y: p.y, px: p.x, py: p.y, down: true, active: true };
+    state.pointer = { x: p.x, y: p.y, px: p.x, py: p.y, down: true, active: true, id: event.pointerId, type: event.pointerType };
     arena.setPointerCapture?.(event.pointerId);
     state.ripples.push({ x: p.x, y: p.y, radius: 8, life: .8, color: '#d8ff3e' });
   });
 
   arena.addEventListener('pointermove', event => {
-    if (!state.pointer.down) return;
+    if (!state.pointer.down || event.pointerId !== state.pointer.id || !state.running) return;
     const p = pointerPosition(event);
     state.pointer.x = p.x;
     state.pointer.y = p.y;
+    state.pointer.active = true;
   });
 
-  const releasePointer = () => { state.pointer.down = false; };
+  function releasePointer(event) {
+    if (event && event.pointerId !== state.pointer.id) return;
+    const id = state.pointer.id;
+    // Mouse clicks keep their destination; touch only steers while held.
+    if (!event || event.type !== 'pointerup' || state.pointer.type !== 'mouse') state.pointer.active = false;
+    state.pointer.down = false;
+    state.pointer.id = null;
+    state.pointer.type = null;
+    if (id !== null && arena.hasPointerCapture?.(id)) arena.releasePointerCapture(id);
+  }
+  function clearInput() {
+    state.keys.clear();
+    releasePointer();
+  }
   arena.addEventListener('pointerup', releasePointer);
   arena.addEventListener('pointercancel', releasePointer);
+  arena.addEventListener('lostpointercapture', releasePointer);
 
   window.addEventListener('keydown', event => {
+    if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
     if (event.code === 'KeyB') {
       event.preventDefault();
       if (!event.repeat) {
@@ -1297,7 +1310,8 @@
     }
   });
   window.addEventListener('keyup', event => state.keys.delete(event.code));
-  window.addEventListener('blur', () => state.keys.clear());
+  window.addEventListener('blur', clearInput);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) clearInput(); });
 
   document.querySelector('#startButton').addEventListener('click', event => {
     event.stopPropagation();
@@ -1308,7 +1322,15 @@
     newGame(true);
   });
   document.querySelector('#restartButton').addEventListener('click', () => newGame(true));
-  document.querySelector('#jumpButton').addEventListener('click', startJump);
+  const jumpButton = document.querySelector('#jumpButton');
+  jumpButton.addEventListener('pointerdown', event => {
+    if (event.pointerType === 'mouse') return;
+    event.preventDefault();
+    startJump();
+  });
+  // The cooldown makes a subsequent compatibility click harmless; keyboard
+  // and mouse users keep normal button activation.
+  jumpButton.addEventListener('click', startJump);
   shopButton.addEventListener('click', openShop);
   document.querySelector('#closeShopButton').addEventListener('click', () => shopDialog.close());
   document.querySelector('#shopCloseIcon').addEventListener('click', () => shopDialog.close());
@@ -1342,6 +1364,7 @@
   });
 
   window.addEventListener('resize', () => {
+    clearInput();
     const oldCx = state.cx;
     const oldCy = state.cy;
     resize();

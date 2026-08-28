@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#050609">
   <title>SPIN OUT — 회전 물리 서바이벌</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.png?v=20260829">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=20260829">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=20260829">
+  <link rel="stylesheet" href="style.css?v=20260829-cosmetics">
 </head>
 <body>
   <main class="game-shell">
@@ -18,7 +21,7 @@
     </header>
 
     <section id="arena" class="arena" aria-label="회전 물리 게임 영역">
-      <canvas id="gameCanvas" tabindex="0" aria-label="WASD 또는 마우스로 이동, 스페이스 점프, B 상점"></canvas>
+      <canvas id="gameCanvas" tabindex="0" aria-label="WASD·마우스 또는 터치 드래그로 이동, 스페이스·점프 버튼으로 점프, B·상점 버튼으로 상점"></canvas>
       <div class="round-info">
         <span id="coinCountdown">코인까지 10초</span>
         <span id="jumpStatus" class="jump-status ready">SPACE · READY</span>
@@ -32,6 +35,7 @@
         <p>3개의 중심축, 구역마다 4개의 회전 막대!<br>코인을 모아 강화하고 나만의 캐릭터를 꾸미세요.</p>
         <button id="startButton" class="primary-button">게임 시작 <span>↗</span></button>
         <div class="gesture-hint"><span class="key-icon">W</span> 이동 · <span class="space-key">SPACE</span> 점프</div>
+        <div class="touch-hint">화면을 누른 채 이동 · 다른 손으로 ↑ 점프<br>모바일은 세로 화면을 권장합니다.</div>
       </div>
 
       <div id="resultScreen" class="overlay result-screen">
@@ -76,6 +80,6 @@
     <p id="saveStatus" class="shop-footnote" role="status"></p>
     <p class="shop-footnote">같은 브라우저에서 유지 · 브라우저 데이터 삭제 시 초기화 · B / ESC 닫기</p>
   </dialog>
-  <script src="game.js"></script>
+  <script src="game.js?v=20260829-cosmetics"></script>
 </body>
 </html>
