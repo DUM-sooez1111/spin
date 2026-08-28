@@ -301,6 +301,22 @@ kbd { margin-left: 5px; font: 10px "DM Mono", monospace; opacity: .6; }
 }
 .shop-dialog::backdrop { background: #020305c9; backdrop-filter: blur(7px); }
 .shop-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.shop-heading { padding-right: 22px; }
+.shop-close { position: absolute; right: 9px; top: 8px; width: 32px; height: 32px; border: 0; border-radius: 50%; color: #c3c8d2; background: #ffffff0a; cursor: pointer; font-size: 23px; }
+.shop-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.shop-tabs button { flex: 1; padding: 11px; border: 1px solid #ffffff19; border-radius: 10px; background: #14181e; color: #9ba3b1; font-size: 12px; cursor: pointer; }
+.shop-tabs button[aria-pressed="true"] { color: var(--acid); border-color: #d8ff3e66; background: #d8ff3e10; }
+.outfit-preview { display: flex; align-items: center; margin-bottom: 16px; background: linear-gradient(110deg, #232139, #151a1e); border: 1px solid #ffffff13; border-radius: 14px; padding: 4px 10px; gap: 4px; }
+.outfit-preview canvas { width: 90px; height: 75px; flex: 0 0 90px; }
+.outfit-preview .eyebrow { font-size: 8px; }
+.outfit-preview h3 { font-size: 12px; margin: 6px 0; }
+.outfit-preview p { font-size: 10px; color: #9ba3b1; line-height: 1.6; margin: 0; }
+.cosmetic-card canvas { display: block; width: 120px; height: 100px; max-width: 100%; object-fit: contain; margin: 0 auto; }
+.cosmetic-card .upgrade-top { font-size: 10px; color: #8b95a7; }
+.cosmetic-card.equipped { border-color: #d8ff3e60; }
+.cosmetic-card.equipped .cosmetic-status { color: var(--acid); }
+.cosmetic-card h3 { margin-top: 0; }
+.upgrade-notice { font-size: 11px; line-height: 1.7; color: #a6acb7; margin: 0 0 14px; }
 .shop-heading .eyebrow { margin-bottom: 8px; font-size: 9px; }
 .shop-heading h2 { font-size: 25px; letter-spacing: -.05em; margin: 0; }
 .shop-wallet { color: var(--muted); font-size: 10px; text-align: right; white-space: nowrap; }

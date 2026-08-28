@@ -18,6 +18,18 @@
   const shopDialog = document.querySelector('#shopDialog');
   const shopButton = document.querySelector('#shopButton');
   const shopItems = document.querySelector('#shopItems');
+  const cosmeticItems = document.querySelector('#cosmeticItems');
+  const PROFILE_KEY = 'spin-out-profile-v1';
+  const COSMETICS = [
+    { id: 'classic', slot: 'skin', name: '클래식 루비', price: 0, color: '#ff3355' },
+    { id: 'ice', slot: 'skin', name: '아이스 민트', price: 2, color: '#80f5ed' },
+    { id: 'violet', slot: 'skin', name: '라벤더 드림', price: 4, color: '#bd8aff' },
+    { id: 'gold', slot: 'skin', name: '골든 선샤인', price: 6, color: '#ffd65c' },
+    { id: 'none', slot: 'accessory', name: '장식 벗기', price: 0 },
+    { id: 'glasses', slot: 'accessory', name: '선글라스', price: 3 },
+    { id: 'ears', slot: 'accessory', name: '고양이 귀', price: 4 },
+    { id: 'crown', slot: 'accessory', name: '미니 왕관', price: 5 },
+  ];
   const UPGRADES = [
     { id: 'speed', name: '이동 속도', icon: '↗', description: '이동 속도와 가속도 +15%', base: 3, max: 4 },
     { id: 'jump', name: '점프 재충전', icon: '↑', description: '점프 쿨타임 −0.2초', base: 4, max: 5 },
@@ -39,6 +51,10 @@
     nextCoinTime: 10,
     coins: [],
     coinScore: 0,
+    ownedCosmetics: new Set(['classic', 'none']),
+    equipped: { skin: 'classic', accessory: 'none' },
+    storageAvailable: true,
+    shopView: 'cosmetics',
     shopOpen: false,
     upgrades: {},
     hubs: [],
@@ -65,6 +81,52 @@
   const rand = (min, max) => min + Math.random() * (max - min);
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
   const hypot = (x, y) => Math.hypot(x, y) || 0.0001;
+
+  function renderSaveStatus() {
+    document.querySelector('#saveStatus').textContent = state.storageAvailable
+      ? '코인·구매한 꾸미기·장착 상태는 이 브라우저에 자동 저장됩니다.'
+      : '브라우저 저장 불가: 이번 실행에서는 유지되지만 창을 닫으면 사라질 수 있습니다.';
+  }
+
+  function loadProfile() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PROFILE_KEY));
+      if (saved && saved.version === 1) {
+        state.coinScore = Number.isSafeInteger(saved.coins) && saved.coins >= 0 && saved.coins <= 1e9 ? saved.coins : 0;
+        const owned = Array.isArray(saved.owned) ? saved.owned : [];
+        state.ownedCosmetics = new Set(['classic', 'none', ...COSMETICS.filter(c => owned.includes(c.id)).map(c => c.id)]);
+        for (const slot of ['skin', 'accessory']) {
+          const item = COSMETICS.find(c => c.id === saved.equipped?.[slot] && c.slot === slot);
+          if (item && state.ownedCosmetics.has(item.id)) state.equipped[slot] = item.id;
+        }
+      }
+    } catch {
+      state.storageAvailable = false;
+    }
+    renderSaveStatus();
+  }
+
+  function saveProfile() {
+    try {
+      // One record keeps the wallet deduction and item ownership together.
+      localStorage.setItem(PROFILE_KEY, JSON.stringify({
+        version: 1, coins: state.coinScore,
+        owned: [...state.ownedCosmetics], equipped: state.equipped,
+      }));
+      state.storageAvailable = true;
+    } catch {
+      if (state.storageAvailable) showToast('자동 저장 불가 · 브라우저 저장 설정을 확인하세요');
+      state.storageAvailable = false;
+    }
+    renderSaveStatus();
+  }
+
+  function applyAppearance() {
+    const player = state.contestants.find(c => c.player);
+    if (!player) return;
+    player.color = COSMETICS.find(c => c.id === state.equipped.skin).color;
+    player.accessoryId = state.equipped.accessory;
+  }
 
   function resize() {
     const rect = arena.getBoundingClientRect();
@@ -94,7 +156,6 @@
     state.nextCull = 8.5;
     state.nextCoinTime = 10;
     state.coins.length = 0;
-    state.coinScore = 0;
     state.round = 1;
     state.finished = false;
     state.particles.length = 0;
@@ -166,7 +227,8 @@
       };
     });
     remainingEl.textContent = String(TOTAL_CONTESTANTS);
-    coinCountEl.textContent = '0';
+    applyAppearance();
+    coinCountEl.textContent = String(state.coinScore);
     coinCountdownEl.textContent = '코인까지 10초';
     timerEl.textContent = '00:00';
     jumpStatusEl.textContent = 'SPACE · READY';
@@ -410,6 +472,7 @@
   }
 
   function updateCoins() {
+    const previousScore = state.coinScore;
     state.coins = state.coins.filter(c => c.expiresAt > state.elapsed);
     while (state.elapsed >= state.nextCoinTime) {
       spawnCoin();
@@ -419,12 +482,13 @@
     if (player && player.jumpHeight < 24) {
       state.coins = state.coins.filter(coin => {
         if (hypot(player.x - coin.x, player.y - coin.y) > player.radius + coin.radius + player.coinReach) return true;
-        state.coinScore++;
+        state.coinScore = Math.min(1e9, state.coinScore + 1);
         state.ripples.push({ x: coin.x, y: coin.y, radius: 8, life: .65, color: '#ffe268' });
         return false;
       });
     }
     coinCountEl.textContent = String(state.coinScore);
+    if (state.coinScore !== previousScore) saveProfile();
     coinCountdownEl.textContent = `코인까지 ${Math.max(0, Math.ceil(state.nextCoinTime - state.elapsed))}초`;
   }
 
@@ -453,6 +517,56 @@
       button.disabled = maxed || state.coinScore < price;
       button.textContent = maxed ? '최대 강화 완료' : `◉ ${price} · ${state.coinScore < price ? '코인 부족' : '업그레이드'}`;
     }
+    renderCosmetics();
+  }
+
+  function drawShopPreview(canvas, skinId, accessoryId) {
+    const preview = canvas.getContext('2d');
+    preview.clearRect(0, 0, canvas.width, canvas.height);
+    const player = state.contestants.find(c => c.player);
+    drawCharacter({ ...player, player: false, x: canvas.width / 2, y: 63, radius: 26,
+      color: COSMETICS.find(c => c.id === skinId).color, accessoryId,
+      jumpHeight: 0, faceAngle: 0, danger: 0, invulnerableUntil: 0, flash: 0 }, preview);
+  }
+
+  function renderCosmetics() {
+    drawShopPreview(document.querySelector('#outfitPreview'), state.equipped.skin, state.equipped.accessory);
+    document.querySelector('#outfitName').textContent = [state.equipped.skin, state.equipped.accessory]
+      .map(id => COSMETICS.find(c => c.id === id).name).join(' · ');
+    for (const item of COSMETICS) {
+      const card = cosmeticItems.querySelector(`[data-cosmetic="${item.id}"]`);
+      const owned = state.ownedCosmetics.has(item.id);
+      const equipped = state.equipped[item.slot] === item.id;
+      const button = card.querySelector('button');
+      card.classList.toggle('equipped', equipped);
+      card.querySelector('.cosmetic-status').textContent = equipped ? '장착 중' : owned ? '보유 중' : '미보유';
+      button.disabled = equipped || (!owned && state.coinScore < item.price);
+      button.textContent = equipped ? '장착 중' : owned ? '장착하기' : `◉ ${item.price} · ${state.coinScore < item.price ? '코인 부족' : '구매 + 장착'}`;
+      drawShopPreview(card.querySelector('canvas'), item.slot === 'skin' ? item.id : state.equipped.skin,
+        item.slot === 'accessory' ? item.id : state.equipped.accessory);
+    }
+    for (const button of document.querySelectorAll('[data-shop-view]')) {
+      button.setAttribute('aria-pressed', String(button.dataset.shopView === state.shopView));
+    }
+    document.querySelector('#upgradePanel').hidden = state.shopView !== 'upgrades';
+    document.querySelector('#cosmeticPanel').hidden = state.shopView !== 'cosmetics';
+  }
+
+  function buyOrEquipCosmetic(id) {
+    const item = COSMETICS.find(c => c.id === id);
+    if (!state.shopOpen || !item) return false;
+    const owned = state.ownedCosmetics.has(id);
+    if (!owned && state.coinScore < item.price) return false;
+    if (!owned) {
+      state.coinScore -= item.price;
+      state.ownedCosmetics.add(id);
+    }
+    state.equipped[item.slot] = id;
+    applyAppearance();
+    saveProfile();
+    renderShop();
+    document.querySelector('#shopMessage').textContent = `${item.name} ${owned ? '장착' : '구매 및 장착'} 완료!`;
+    return true;
   }
 
   function openShop() {
@@ -462,7 +576,7 @@
     state.keys.clear();
     state.pointer.active = false;
     state.pointer.down = false;
-    document.querySelector('#shopMessage').textContent = '강화는 리스폰 후에도 유지됩니다.';
+    document.querySelector('#shopMessage').textContent = '꾸미기는 영구 소장 · 능력 강화는 이번 판에 적용';
     renderShop();
     shopDialog.showModal();
   }
@@ -481,6 +595,7 @@
     player.jumpCooldown = Math.min(player.jumpCooldown, player.jumpCooldownDuration);
     player.respawnShieldDuration = 1.2 + state.upgrades.shield * .6;
     player.coinReach = state.upgrades.magnet * 24;
+    saveProfile();
     renderShop();
     updateJumpStatus();
     document.querySelector('#shopMessage').textContent = `${upgrade.name} LV ${state.upgrades[id]} 강화 완료!`;
@@ -965,7 +1080,8 @@
     ctx.stroke();
   }
 
-  function drawCharacter(body) {
+  function drawCharacter(body, drawingContext = ctx) {
+    const ctx = drawingContext;
     ctx.save();
     ctx.translate(body.x, body.y);
     if (body.jumpHeight > 0) {
@@ -1029,14 +1145,53 @@
     ctx.beginPath();
     ctx.arc(0, body.radius * .12, body.radius * .28, .22, Math.PI - .22);
     ctx.stroke();
+    drawAccessory(ctx, body);
     if (body.player) {
       ctx.save();
       ctx.rotate(-body.faceAngle);
       ctx.fillStyle = '#ffffff';
       ctx.font = '700 18px "DM Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('YOU', 0, -body.radius - 13);
+      const hasHat = ['crown', 'ears'].includes(body.accessoryId);
+      ctx.fillText('YOU', 0, -body.radius * (hasHat ? 1.8 : 1) - 13);
       ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  function drawAccessory(ctx, body) {
+    const r = body.radius;
+    ctx.save();
+    if (body.accessoryId === 'glasses') {
+      ctx.fillStyle = '#111827';
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = r * .07;
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.roundRect(side * r * .35 - r * .27, -r * .25, r * .54, r * .38, r * .1);
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath();ctx.moveTo(side * r * .35 - r * .12, -r * .13);
+        ctx.lineTo(side * r * .35 + r * .03, -r * .13);ctx.stroke();
+      }
+      ctx.beginPath();ctx.moveTo(-r * .08, -r * .12);ctx.lineTo(r * .08, -r * .12);ctx.stroke();
+    } else if (body.accessoryId === 'crown') {
+      ctx.fillStyle = '#ffd65c';ctx.strokeStyle = '#fff0ae';ctx.lineWidth = r * .07;
+      ctx.beginPath();ctx.moveTo(-r * .62, -r * .8);
+      ctx.lineTo(-r * .75, -r * 1.5);ctx.lineTo(-r * .28, -r * 1.22);
+      ctx.lineTo(0, -r * 1.72);ctx.lineTo(r * .28, -r * 1.22);
+      ctx.lineTo(r * .75, -r * 1.5);ctx.lineTo(r * .62, -r * .8);
+      ctx.closePath();ctx.fill();ctx.stroke();
+      ctx.fillStyle = '#ff477e';ctx.beginPath();ctx.arc(0, -r * 1.08, r * .12, 0, TAU);ctx.fill();
+    } else if (body.accessoryId === 'ears') {
+      for (const side of [-1, 1]) {
+        ctx.fillStyle = body.color;ctx.strokeStyle = '#fce7f3';ctx.lineWidth = r * .06;
+        ctx.beginPath();ctx.moveTo(side * r * .18, -r * .91);
+        ctx.lineTo(side * r * .76, -r * 1.58);ctx.lineTo(side * r * .91, -r * .48);
+        ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.fillStyle = '#ff9abe';ctx.beginPath();ctx.moveTo(side * r * .38, -r * .93);
+        ctx.lineTo(side * r * .72, -r * 1.32);ctx.lineTo(side * r * .79, -r * .73);
+        ctx.closePath();ctx.fill();
+      }
     }
     ctx.restore();
   }
@@ -1156,6 +1311,10 @@
   document.querySelector('#jumpButton').addEventListener('click', startJump);
   shopButton.addEventListener('click', openShop);
   document.querySelector('#closeShopButton').addEventListener('click', () => shopDialog.close());
+  document.querySelector('#shopCloseIcon').addEventListener('click', () => shopDialog.close());
+  document.querySelectorAll('[data-shop-view]').forEach(button => {
+    button.addEventListener('click', () => { state.shopView = button.dataset.shopView; renderShop(); });
+  });
   shopDialog.addEventListener('close', () => {
     if (!state.shopOpen || shopDialog.open) return;
     state.shopOpen = false;
@@ -1173,6 +1332,14 @@
     const button = event.target.closest('button');
     if (button) buyUpgrade(button.closest('[data-upgrade]').dataset.upgrade);
   });
+  cosmeticItems.innerHTML = COSMETICS.map(item => `<article class="upgrade-card cosmetic-card" data-cosmetic="${item.id}">
+    <div class="upgrade-top"><span>${item.slot === 'skin' ? '스킨' : '장식'}</span><span class="cosmetic-status"></span></div>
+    <canvas width="120" height="100" aria-label="${item.name} 미리보기"></canvas>
+    <h3>${item.name}</h3><button type="button" aria-label="${item.name} 구매 또는 장착"></button></article>`).join('');
+  cosmeticItems.addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if (button) buyOrEquipCosmetic(button.closest('[data-cosmetic]').dataset.cosmetic);
+  });
 
   window.addEventListener('resize', () => {
     const oldCx = state.cx;
@@ -1183,6 +1350,7 @@
     for (const c of state.contestants) { c.x += dx; c.y += dy; }
   });
 
+  loadProfile();
   resize();
   newGame(false);
   requestAnimationFrame(frame);
