@@ -844,16 +844,21 @@
     ctx.translate(state.cx, state.cy);
     const pulse = Math.sin(state.elapsed * 2) * 2;
     ctx.setLineDash([2, 10]);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255,255,255,.10)';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,.45)';
     ctx.beginPath();
     ctx.arc(0, 0, state.arenaRadius + pulse, 0, TAU);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.strokeStyle = 'rgba(216,255,62,.04)';
+    ctx.strokeStyle = 'rgba(216,255,62,.16)';
     ctx.lineWidth = 12;
     ctx.beginPath();
     ctx.arc(0, 0, state.arenaRadius, 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(216,255,62,.90)';
+    ctx.lineWidth = 4;
+    ctx.shadowColor = '#d8ff3e';
+    ctx.shadowBlur = 14;
     ctx.stroke();
     ctx.restore();
     for (const hub of state.hubs) {
