@@ -483,6 +483,18 @@
     return true;
   }
 
+  function applyCenterPull(body, dt) {
+    const dx = state.cx - body.x;
+    const dy = state.cy - body.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < .001) return;
+    // A gentle, capped acceleration preserves momentum and player control.
+    // Ease off near the center instead of snapping characters into place.
+    const acceleration = Math.min(distance * .12, 30);
+    body.vx += dx / distance * acceleration * dt;
+    body.vy += dy / distance * acceleration * dt;
+  }
+
   function physicsStep(dt) {
     const alive = state.contestants.filter(c => c.alive);
     const rods = state.rods;
@@ -533,8 +545,7 @@
       body.vy *= Math.pow(.988, dt * 60);
       body.spin *= Math.pow(.985, dt * 60);
       body.faceAngle += body.spin * dt;
-      body.vx += (state.cx - body.x) * .012 * dt;
-      body.vy += (state.cy - body.y) * .012 * dt;
+      applyCenterPull(body, dt);
 
       for (const rod of rods) {
         const ux = Math.cos(rod.angle);
@@ -840,16 +851,21 @@
     ctx.translate(state.cx, state.cy);
     const pulse = Math.sin(state.elapsed * 2) * 2;
     ctx.setLineDash([2, 10]);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255,255,255,.10)';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,.45)';
     ctx.beginPath();
     ctx.arc(0, 0, state.arenaRadius + pulse, 0, TAU);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.strokeStyle = 'rgba(216,255,62,.04)';
+    ctx.strokeStyle = 'rgba(216,255,62,.16)';
     ctx.lineWidth = 12;
     ctx.beginPath();
     ctx.arc(0, 0, state.arenaRadius, 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(216,255,62,.90)';
+    ctx.lineWidth = 4;
+    ctx.shadowColor = '#d8ff3e';
+    ctx.shadowBlur = 14;
     ctx.stroke();
     ctx.restore();
     for (const hub of state.hubs) {
